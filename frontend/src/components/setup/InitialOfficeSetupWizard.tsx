@@ -4,6 +4,7 @@ import {
   analyzeInitialOfficeSetup,
   applyInitialOfficeSetup,
   fetchLlmRuntime,
+  previewOfficeScan,
   previewProviderModels,
   saveApiKey,
   saveLlmRuntime,
@@ -16,12 +17,16 @@ import {
   type HuggingFaceModelItem,
   type InitialOfficeSetupResult,
   type LlmProviderName,
+  type OfficeScanReport,
+  type OfficeScanRequest,
   type PatchNoteRecommendationItem,
   type ProviderModelPayload,
   type UploadRecord,
 } from '../../api';
 import { setSessionToken } from '../../auth';
 import AiJobStatusBar from '../common/AiJobStatusBar';
+import Button from '../common/Button';
+import FormActions from '../common/FormActions';
 import { SETUP_DRAFT_KEY } from './setupDraft';
 
 type Props = {
@@ -117,7 +122,16 @@ type SetupDraft = {
   uploads: UploadRecord[];
   message: string;
   apiRiskAccepted: boolean;
+  scanRoots: string;
+  scanExcludes: string;
 };
+
+function parsePathLines(text: string): string[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
 
 const defaultCompanyProfile: CompanyProfile = {
     organization_size: 'startup',
@@ -160,6 +174,8 @@ function loadSetupDraft(): SetupDraft | null {
       uploads: parsed.uploads || [],
       message: parsed.message || '',
       apiRiskAccepted: Boolean(parsed.apiRiskAccepted),
+      scanRoots: parsed.scanRoots || '',
+      scanExcludes: parsed.scanExcludes || '',
     };
   } catch {
     return null;
@@ -204,6 +220,10 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
   );
   const [uploads, setUploads] = useState<UploadRecord[]>(savedDraft?.uploads || []);
   const [message, setMessage] = useState(savedDraft?.message || '');
+  const [scanRoots, setScanRoots] = useState(savedDraft?.scanRoots || '');
+  const [scanExcludes, setScanExcludes] = useState(savedDraft?.scanExcludes || '');
+  const [scanAllowCloud, setScanAllowCloud] = useState(false);
+  const [scanReport, setScanReport] = useState<OfficeScanReport | null>(null);
   const [result, setResult] = useState<InitialOfficeSetupResult | null>(null);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -235,6 +255,8 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
       uploads,
       message,
       apiRiskAccepted,
+      scanRoots,
+      scanExcludes,
     });
   }, [
     adapterModel,
@@ -250,6 +272,8 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
     message,
     model,
     provider,
+    scanExcludes,
+    scanRoots,
     selectedUploadPath,
     step,
     uploads,
@@ -414,6 +438,39 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
     }
   }
 
+  function buildScanRequest(): OfficeScanRequest | null {
+    const roots = parsePathLines(scanRoots);
+    if (!roots.length) return null;
+    return {
+      root_paths: roots,
+      excluded_paths: parsePathLines(scanExcludes),
+      allow_cloud: scanAllowCloud,
+    };
+  }
+
+  async function runScanPreview() {
+    const request = buildScanRequest();
+    if (!request) {
+      setNotice('스캔할 폴더 경로를 한 줄에 하나씩 입력하세요.');
+      return;
+    }
+    setBusy(true);
+    setNotice('');
+    try {
+      const report = await previewOfficeScan(request);
+      setScanReport(report);
+      setNotice(
+        report.included_count
+          ? `스캔 미리보기 완료: 문서 ${report.included_count}개를 읽습니다.`
+          : '읽을 수 있는 문서를 찾지 못했습니다. 경로를 확인해 주세요.',
+      );
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : '스캔 미리보기 실패');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function analyze() {
     setBusy(true);
     setNotice('');
@@ -436,6 +493,7 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
         upload_ids: uploads.map((upload) => upload.id),
         intent: 'initial_office_setup',
         company_profile: companyProfile,
+        scan: buildScanRequest(),
       });
       setResult(analyzed);
       setAiJob(analyzed.ai_job ?? null);
@@ -485,7 +543,9 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
             <input placeholder="표시 이름" value={admin.display_name} onChange={(e) => setAdmin({ ...admin, display_name: e.target.value })} />
             <input placeholder="직함" value={admin.title} onChange={(e) => setAdmin({ ...admin, title: e.target.value })} />
             <input type="password" placeholder="비밀번호" value={admin.password} onChange={(e) => setAdmin({ ...admin, password: e.target.value })} />
-            <button type="button" disabled={busy} onClick={() => void createAdmin()}>관리자 생성 후 계속</button>
+            <FormActions>
+              <Button disabled={busy} onClick={() => void createAdmin()}>관리자 생성 후 계속</Button>
+            </FormActions>
           </div>
         ) : null}
 
@@ -707,7 +767,9 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
                 </p>
               </div>
             ) : null}
-            <button type="button" disabled={busy} onClick={() => void configureLlm()}>LLM 설정 저장 후 계속</button>
+            <FormActions>
+              <Button disabled={busy} onClick={() => void configureLlm()}>LLM 설정 저장 후 계속</Button>
+            </FormActions>
           </div>
         ) : null}
 
@@ -721,17 +783,83 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
 
         {step === 'files' ? (
           <div className="memory-form">
-            <p className="muted">회사 인적 사항, 조직도, 운영 규정 파일을 올리면 AI가 초기 메모리와 사용자/직함 초안을 만듭니다.</p>
-            <input type="file" multiple accept=".csv,.tsv,.xlsx,.txt,.md" onChange={(e) => void uploadFiles(e)} />
-            <div className="log-list">
-              {uploads.map((upload) => (
-                <article className="log-card" key={upload.id}>
-                  <strong>{upload.filename}</strong>
-                  <small>{upload.path}</small>
+            <div className="panel-subsection">
+              <h3>회사 폴더 자동 스캔 (권장)</h3>
+              <p className="muted">
+                회사 문서가 있는 폴더 경로를 알려주면 AI가 문서를 훑어보고 회사가 무슨 일을 하는지,
+                부서와 업무 흐름이 어떻게 되는지 초안을 만듭니다. 열면 안 되는 폴더는 제외 목록에 넣으세요.
+                비밀번호·인증서·설정 파일 등은 기본으로 항상 제외됩니다.
+              </p>
+              <label>
+                스캔할 폴더 (한 줄에 하나씩)
+                <textarea
+                  value={scanRoots}
+                  onChange={(e) => setScanRoots(e.target.value)}
+                  placeholder={'예:\nC:\\Users\\me\\Documents\\회사문서\nD:\\공유폴더\\업무자료'}
+                />
+              </label>
+              <label>
+                제외할 경로 (한 줄에 하나씩, 선택)
+                <textarea
+                  value={scanExcludes}
+                  onChange={(e) => setScanExcludes(e.target.value)}
+                  placeholder={'예:\nC:\\Users\\me\\Documents\\회사문서\\급여\n*계약서*'}
+                />
+              </label>
+              <label className="checkbox-inline">
+                <input
+                  type="checkbox"
+                  checked={scanAllowCloud}
+                  onChange={(e) => setScanAllowCloud(e.target.checked)}
+                />
+                로컬 LLM이 없어 스캔한 문서를 외부 API로 보내 분석하는 것에 동의합니다. (기본: 로컬 전용)
+              </label>
+              <FormActions>
+                <Button variant="secondary" disabled={busy} onClick={() => void runScanPreview()}>
+                  스캔 미리보기
+                </Button>
+              </FormActions>
+              {scanReport ? (
+                <article className="log-card">
+                  <strong>
+                    읽을 문서 {scanReport.included_count}개
+                    {scanReport.truncated ? ' (상한 도달, 일부만 사용)' : ''}
+                  </strong>
+                  <small>
+                    제외됨: {Object.entries(scanReport.skipped_counts)
+                      .map(([reason, count]) => `${reason} ${count}`)
+                      .join(' · ') || '없음'}
+                  </small>
+                  {scanReport.missing_roots.length ? (
+                    <small>찾지 못한 경로: {scanReport.missing_roots.join(', ')}</small>
+                  ) : null}
+                  <div className="log-list">
+                    {scanReport.files
+                      .filter((file) => file.included)
+                      .slice(0, 8)
+                      .map((file) => (
+                        <small key={file.path}>{file.path}</small>
+                      ))}
+                  </div>
                 </article>
-              ))}
+              ) : null}
             </div>
-            <button type="button" onClick={() => setStep('analyze')}>파일 선택 완료</button>
+            <div className="panel-subsection">
+              <h3>파일 직접 업로드 (선택)</h3>
+              <p className="muted">폴더 스캔 대신, 또는 스캔과 함께 조직도·운영 규정 파일을 직접 올릴 수도 있습니다.</p>
+              <input type="file" multiple accept=".csv,.tsv,.xlsx,.txt,.md" onChange={(e) => void uploadFiles(e)} />
+              <div className="log-list">
+                {uploads.map((upload) => (
+                  <article className="log-card" key={upload.id}>
+                    <strong>{upload.filename}</strong>
+                    <small>{upload.path}</small>
+                  </article>
+                ))}
+              </div>
+            </div>
+            <FormActions>
+              <Button onClick={() => setStep('analyze')}>데이터 선택 완료</Button>
+            </FormActions>
           </div>
         ) : null}
 
@@ -742,13 +870,31 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
               placeholder="예: 이 엑셀 파일의 직함을 보고 부서/역할/초기 업무 메모리를 정리해줘"
               onChange={(e) => setMessage(e.target.value)}
             />
-            <button type="button" disabled={busy} onClick={() => void analyze()}>AI로 초기 오피스 세팅 분석</button>
+            <FormActions>
+              <Button disabled={busy} onClick={() => void analyze()}>AI로 초기 오피스 세팅 분석</Button>
+            </FormActions>
           </div>
         ) : null}
 
         {step === 'review' ? (
           <div className="memory-form">
             <p className="muted">AI가 만든 초안을 검토한 뒤 적용하세요. 직원 로그인 계정은 자동 생성하지 않습니다.</p>
+            {result?.provenance?.source === 'company_scan' ? (
+              <article className="log-card">
+                <strong>회사 폴더 자동 스캔 결과로 만든 초안입니다</strong>
+                <small>
+                  스캔 폴더: {result.provenance.roots.join(', ')} · 읽은 문서 {result.provenance.scanned_files}개 ·
+                  분석 경로: {result.provenance.route === 'local' ? '로컬 LLM (외부 전송 없음)' : '설정된 라우트'}
+                </small>
+                <small>아래 항목은 AI가 문서를 보고 추론한 내용입니다. 회사와 다른 부분은 끄거나 적용 후 수정하세요.</small>
+              </article>
+            ) : null}
+            {result?.notes?.length ? (
+              <ul>{result.notes.map((note) => <li key={note} className="muted">{note}</li>)}</ul>
+            ) : null}
+            {result?.warnings?.length ? (
+              <ul>{result.warnings.map((warning) => <li key={warning} className="alert">{warning}</li>)}</ul>
+            ) : null}
             {result ? (
               <>
                 <ReviewToggle id="memory" label="운영/작업 메모리 적용" checked={applySections.memory} onChange={(id, checked) => setApplySections({ ...applySections, [id]: checked })} />
@@ -774,7 +920,9 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
                 <ul>{result.human_review_required.map((item) => <li key={item}>{item}</li>)}</ul>
               </>
             ) : null}
-            <button type="button" disabled={busy} onClick={() => void apply()}>검토 완료 · 초기 세팅 적용</button>
+            <FormActions>
+              <Button disabled={busy} onClick={() => void apply()}>검토 완료 · 초기 세팅 적용</Button>
+            </FormActions>
           </div>
         ) : null}
 

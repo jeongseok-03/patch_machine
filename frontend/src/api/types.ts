@@ -704,6 +704,42 @@ export type InitialOfficeSetupResult = {
   questions: string[];
   sensitive_hint: boolean;
   ai_job?: AiJobStatus;
+  provenance?: OfficeScanProvenance;
+};
+
+export type OfficeScanRequest = {
+  root_paths: string[];
+  excluded_paths: string[];
+  allow_cloud: boolean;
+  max_files?: number;
+};
+
+export type OfficeScannedFile = {
+  path: string;
+  size: number;
+  extension: string;
+  included: boolean;
+  skip_reason: string;
+};
+
+export type OfficeScanReport = {
+  roots: string[];
+  missing_roots: string[];
+  files: OfficeScannedFile[];
+  included_count: number;
+  skipped_counts: Record<string, number>;
+  total_bytes: number;
+  truncated: boolean;
+};
+
+export type OfficeScanProvenance = {
+  source: string;
+  roots: string[];
+  scanned_files: number;
+  used_files: string[];
+  skipped: Record<string, number>;
+  truncated: boolean;
+  route: string;
 };
 
 export type UploadRecord = {

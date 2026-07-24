@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, HTTPException
 
 from negotium.app.api._shared import (
     _ai_job_payload,
@@ -20,6 +20,7 @@ from negotium.app.api._shared import (
 from negotium.app.company_scan import (
     ScanConfig,
     ScanReport,
+    browse_directories,
     parse_scanned_files,
     scan_company_paths,
 )
@@ -38,6 +39,19 @@ from negotium.archive.access_control import ALL_PERMISSIONS
 def create_setup_router(container: Container) -> APIRouter:
     """Routes for the setup domain."""
     router = APIRouter()
+
+    @router.post("/setup/office/browse")
+    async def browse_office_folders(
+        payload: dict[str, str],
+        x_ng_user: str | None = Header(default=None, alias="X-NG-User"),
+    ) -> dict[str, object]:
+        _require(container, x_ng_user, "admin:users")
+        try:
+            return browse_directories(str(payload.get("path") or ""))
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=404, detail="폴더를 찾을 수 없거나 접근할 수 없습니다."
+            ) from None
 
     @router.post("/setup/office/scan-preview")
     async def preview_office_scan(
@@ -90,7 +104,11 @@ def create_setup_router(container: Container) -> APIRouter:
         )
         try:
             markdown = await _complete_office_task(
-                container, prompt, task="memory_summary", force_local=force_local
+                container,
+                prompt,
+                task="memory_summary",
+                force_local=force_local,
+                max_tokens=12000,
             )
             job = _finish_ai_job(
                 container,

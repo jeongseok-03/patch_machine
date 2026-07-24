@@ -1675,6 +1675,7 @@ async def _complete_office_task(
     task: str = "document_generation",
     image_parts: list[dict[str, Any]] | None = None,
     force_local: bool = False,
+    max_tokens: int = 1600,
 ) -> str:
     if force_local:
         provider, route = _resolve_forced_local_task(container, task)
@@ -1698,13 +1699,15 @@ async def _complete_office_task(
         provider=provider,
         route=route,
         temperature=0.2,
-        max_tokens=1600,
+        max_tokens=max_tokens,
         task=task,
         model=model,
     )
     text = response.text.strip()
     if text:
         return text
+    # Reasoning models (e.g. solar-open2) can spend the whole budget on hidden
+    # reasoning tokens and return an empty body — retry with a larger ceiling.
     try:
         retry = await _complete_with_provider(
             container,
@@ -1712,7 +1715,7 @@ async def _complete_office_task(
             provider=provider,
             route=route,
             temperature=0.2,
-            max_tokens=6000,
+            max_tokens=max(6000, max_tokens * 2),
             task=task,
             model=model,
         )

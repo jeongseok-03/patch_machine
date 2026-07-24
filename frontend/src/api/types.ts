@@ -732,6 +732,18 @@ export type OfficeScanReport = {
   truncated: boolean;
 };
 
+export type OfficeBrowseEntry = {
+  name: string;
+  path: string;
+};
+
+export type OfficeBrowseResult = {
+  path: string;
+  display: string;
+  parent: string;
+  entries: OfficeBrowseEntry[];
+};
+
 export type OfficeScanProvenance = {
   source: string;
   roots: string[];

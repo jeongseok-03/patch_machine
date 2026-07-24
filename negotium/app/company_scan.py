@@ -146,6 +146,74 @@ class ScanReport:
         }
 
 
+def to_display_path(path: str) -> str:
+    """Render a server path in the form the user's OS shows (C:\\... on WSL mounts)."""
+
+    text = str(path)
+    is_mount = text.startswith("/mnt/") and len(text) >= 6 and text[5].isalpha()
+    if is_mount and (len(text) == 6 or text[6] == "/"):
+        drive = text[5].upper()
+        rest = text[7:] if len(text) > 7 else ""
+        suffix = rest.replace("/", "\\")
+        return f"{drive}:\\{suffix}" if suffix else f"{drive}:\\"
+    return text
+
+
+def browse_directories(raw_path: str) -> dict[str, object]:
+    """List sub-directories for the wizard's folder picker.
+
+    Empty path returns the top-level roots (Windows drives on WSL, otherwise
+    the home directory and filesystem root). Only directory names are read —
+    never file contents. Hidden, system, and symlinked directories are skipped.
+    """
+
+    if not raw_path.strip():
+        roots: list[dict[str, str]] = []
+        mnt = Path("/mnt")
+        if mnt.is_dir():
+            for child in sorted(mnt.iterdir()):
+                if child.is_dir() and len(child.name) == 1 and child.name.isalpha():
+                    roots.append(
+                        {
+                            "name": f"{child.name.upper()}: 드라이브",
+                            "path": to_display_path(str(child)),
+                        }
+                    )
+        if not roots:
+            home = Path.home()
+            roots.append({"name": f"홈 ({home.name})", "path": str(home)})
+            roots.append({"name": "/", "path": "/"})
+        return {"path": "", "display": "", "parent": "", "entries": roots}
+
+    normalized = normalize_scan_path(raw_path)
+    base = Path(normalized)
+    if not base.is_dir():
+        raise FileNotFoundError(raw_path)
+    entries: list[dict[str, str]] = []
+    try:
+        children = sorted(base.iterdir(), key=lambda item: item.name.lower())
+    except OSError as exc:
+        raise FileNotFoundError(raw_path) from exc
+    for child in children:
+        try:
+            if not child.is_dir() or child.is_symlink():
+                continue
+        except OSError:
+            continue
+        if child.name.lower() in DEFAULT_EXCLUDED_DIR_NAMES or child.name.startswith("."):
+            continue
+        entries.append({"name": child.name, "path": to_display_path(str(child))})
+        if len(entries) >= 300:
+            break
+    at_root = base.parent == base
+    return {
+        "path": str(base),
+        "display": to_display_path(str(base)),
+        "parent": "" if at_root else to_display_path(str(base.parent)),
+        "entries": entries,
+    }
+
+
 def normalize_scan_path(raw: str) -> str:
     """Accept Windows-style paths (``C:\\Users\\...``) on a WSL/Linux backend."""
 

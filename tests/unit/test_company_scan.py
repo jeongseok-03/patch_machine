@@ -110,3 +110,33 @@ def test_normalize_scan_path_translates_windows_style() -> None:
     }
     assert normalize_scan_path("  /srv/data  ") == "/srv/data"
     assert normalize_scan_path("") == ""
+
+
+def test_browse_directories_lists_subdirs_only(tmp_path: Path) -> None:
+    from negotium.app.company_scan import browse_directories
+
+    (tmp_path / "문서").mkdir()
+    (tmp_path / ".hidden").mkdir()
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "파일.txt").write_text("x", encoding="utf-8")
+    listing = browse_directories(str(tmp_path))
+    names = [entry["name"] for entry in listing["entries"]]
+    assert names == ["문서"]
+    assert listing["parent"]
+
+
+def test_browse_directories_missing_path_raises(tmp_path: Path) -> None:
+    import pytest
+
+    from negotium.app.company_scan import browse_directories
+
+    with pytest.raises(FileNotFoundError):
+        browse_directories(str(tmp_path / "없음"))
+
+
+def test_to_display_path_converts_wsl_mounts() -> None:
+    from negotium.app.company_scan import to_display_path
+
+    assert to_display_path("/mnt/c/Users/me/docs") == "C:\\Users\\me\\docs"
+    assert to_display_path("/mnt/d") == "D:\\"
+    assert to_display_path("/srv/data") == "/srv/data"

@@ -14,7 +14,9 @@ import portalocker
 @dataclass(frozen=True)
 class TokenLimitConfig:
     enforcement_enabled: bool = True
-    per_request_max_tokens: int = 4000
+    # Reasoning models (solar-open2 등) spend thousands of hidden reasoning
+    # tokens before the visible answer; 4000 starved them into empty replies.
+    per_request_max_tokens: int = 16000
     daily_total_tokens: int = 200_000
     monthly_total_tokens: int = 4_000_000
 
@@ -31,7 +33,7 @@ class TokenLimitConfig:
         payload = payload or {}
         return cls(
             enforcement_enabled=bool(payload.get("enforcement_enabled", True)),
-            per_request_max_tokens=int(payload.get("per_request_max_tokens", 4000) or 0),
+            per_request_max_tokens=int(payload.get("per_request_max_tokens", 16000) or 0),
             daily_total_tokens=int(payload.get("daily_total_tokens", 200_000) or 0),
             monthly_total_tokens=int(payload.get("monthly_total_tokens", 4_000_000) or 0),
         )

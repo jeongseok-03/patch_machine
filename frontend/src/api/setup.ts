@@ -3,9 +3,17 @@ import type {
   AccessControlPayload,
   CompanyProfile,
   InitialOfficeSetupResult,
+  OfficeBrowseResult,
   OfficeScanReport,
   OfficeScanRequest,
 } from './types';
+
+export function browseOfficeFolders(path: string): Promise<OfficeBrowseResult> {
+  return requestJson<OfficeBrowseResult>('/api/setup/office/browse', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  });
+}
 
 export function previewOfficeScan(payload: OfficeScanRequest): Promise<OfficeScanReport> {
   return requestJson<OfficeScanReport>('/api/setup/office/scan-preview', {

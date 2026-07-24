@@ -27,6 +27,7 @@ import { setSessionToken } from '../../auth';
 import AiJobStatusBar from '../common/AiJobStatusBar';
 import Button from '../common/Button';
 import FormActions from '../common/FormActions';
+import FolderBrowserModal from './FolderBrowserModal';
 import { SETUP_DRAFT_KEY } from './setupDraft';
 
 type Props = {
@@ -34,7 +35,7 @@ type Props = {
   initialUser?: AuthUser | null;
 };
 
-type Step = 'admin' | 'llm' | 'profile' | 'files' | 'analyze' | 'review';
+type Step = 'admin' | 'llm' | 'data' | 'analyze' | 'review';
 type LlmChoice = 'local' | 'api';
 type ReviewSection = 'memory' | 'agents' | 'templates' | 'workflows' | 'security' | 'integrations' | 'routes';
 
@@ -118,27 +119,43 @@ type SetupDraft = {
   adapterModel: string;
   localModelUploads: UploadRecord[];
   selectedUploadPath: string;
-  companyProfile: CompanyProfile;
   uploads: UploadRecord[];
   message: string;
   apiRiskAccepted: boolean;
-  scanRoots: string;
-  scanExcludes: string;
+  scanRoots: string[];
+  scanExcludes: string[];
 };
 
-function parsePathLines(text: string): string[] {
-  return text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
+// Older drafts stored newline-separated strings and a 'profile'/'files' step.
+function toPathArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    return value
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+  return [];
 }
 
-const defaultCompanyProfile: CompanyProfile = {
-    organization_size: 'startup',
-    industries: ['it_saas'],
-    departments: ['product_dev_it', 'cs'],
-    primary_goals: ['meeting_notes', 'action_items', 'weekly_patch_notes', 'release_notes', 'integrated_search'],
-    data_sensitivity: ['general'],
+function migrateStep(step: string): Step {
+  if (step === 'profile' || step === 'files') return 'data';
+  if (step === 'admin' || step === 'llm' || step === 'data' || step === 'analyze' || step === 'review') {
+    return step;
+  }
+  return 'admin';
+}
+
+// The wizard no longer asks the admin to describe the company — the AI infers
+// everything from scanned documents. This neutral profile carries no hints.
+const neutralCompanyProfile: CompanyProfile = {
+    organization_size: 'smb',
+    industries: [],
+    departments: [],
+    primary_goals: [],
+    data_sensitivity: [],
     deployment_preference: 'local_recommended',
     company_name: '',
     office_project: '',
@@ -149,18 +166,14 @@ const defaultCompanyProfile: CompanyProfile = {
     automation_priorities: '',
 };
 
-function mergeCompanyProfile(draft?: Partial<CompanyProfile>): CompanyProfile {
-  return { ...defaultCompanyProfile, ...(draft || {}) };
-}
-
 function loadSetupDraft(): SetupDraft | null {
   try {
     const raw = window.localStorage.getItem(SETUP_DRAFT_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<SetupDraft>;
+    const parsed = JSON.parse(raw) as Partial<SetupDraft> & { step?: string };
     if (!parsed.step) return null;
     return {
-      step: parsed.step,
+      step: migrateStep(parsed.step),
       admin: parsed.admin || { user_id: '', display_name: '', title: '시스템 관리자' },
       llmChoice: parsed.llmChoice || 'local',
       provider: parsed.provider || 'solar',
@@ -170,12 +183,11 @@ function loadSetupDraft(): SetupDraft | null {
       adapterModel: parsed.adapterModel || '',
       localModelUploads: parsed.localModelUploads || [],
       selectedUploadPath: parsed.selectedUploadPath || '',
-      companyProfile: mergeCompanyProfile(parsed.companyProfile),
       uploads: parsed.uploads || [],
       message: parsed.message || '',
       apiRiskAccepted: Boolean(parsed.apiRiskAccepted),
-      scanRoots: parsed.scanRoots || '',
-      scanExcludes: parsed.scanExcludes || '',
+      scanRoots: toPathArray(parsed.scanRoots),
+      scanExcludes: toPathArray(parsed.scanExcludes),
     };
   } catch {
     return null;
@@ -215,15 +227,13 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
   const [adapterModel, setAdapterModel] = useState(savedDraft?.adapterModel || '');
   const [localModelUploads, setLocalModelUploads] = useState<UploadRecord[]>(savedDraft?.localModelUploads || []);
   const [selectedUploadPath, setSelectedUploadPath] = useState(savedDraft?.selectedUploadPath || '');
-  const [companyProfile, setCompanyProfile] = useState<CompanyProfile>(
-    mergeCompanyProfile(savedDraft?.companyProfile),
-  );
   const [uploads, setUploads] = useState<UploadRecord[]>(savedDraft?.uploads || []);
   const [message, setMessage] = useState(savedDraft?.message || '');
-  const [scanRoots, setScanRoots] = useState(savedDraft?.scanRoots || '');
-  const [scanExcludes, setScanExcludes] = useState(savedDraft?.scanExcludes || '');
+  const [scanRoots, setScanRoots] = useState<string[]>(savedDraft?.scanRoots || []);
+  const [scanExcludes, setScanExcludes] = useState<string[]>(savedDraft?.scanExcludes || []);
   const [scanAllowCloud, setScanAllowCloud] = useState(false);
   const [scanReport, setScanReport] = useState<OfficeScanReport | null>(null);
+  const [showFolderBrowser, setShowFolderBrowser] = useState(false);
   const [result, setResult] = useState<InitialOfficeSetupResult | null>(null);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -251,7 +261,6 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
       adapterModel,
       localModelUploads,
       selectedUploadPath,
-      companyProfile,
       uploads,
       message,
       apiRiskAccepted,
@@ -264,7 +273,6 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
     admin.title,
     admin.user_id,
     apiRiskAccepted,
-    companyProfile,
     llmChoice,
     localModel,
     localModelQuery,
@@ -278,6 +286,14 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
     step,
     uploads,
   ]);
+
+  // Entering the data step with a cloud LLM already chosen (and its risk
+  // warning accepted) counts as consent — don't ask twice.
+  useEffect(() => {
+    if (step === 'data' && llmChoice === 'api' && apiRiskAccepted) {
+      setScanAllowCloud(true);
+    }
+  }, [step, llmChoice, apiRiskAccepted]);
 
   useEffect(() => {
     async function loadFallbackModels() {
@@ -356,7 +372,7 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
           },
         });
       }
-      setStep('profile');
+      setStep('data');
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'LLM 설정 실패');
     } finally {
@@ -439,11 +455,10 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
   }
 
   function buildScanRequest(): OfficeScanRequest | null {
-    const roots = parsePathLines(scanRoots);
-    if (!roots.length) return null;
+    if (!scanRoots.length) return null;
     return {
-      root_paths: roots,
-      excluded_paths: parsePathLines(scanExcludes),
+      root_paths: scanRoots,
+      excluded_paths: scanExcludes,
       allow_cloud: scanAllowCloud,
     };
   }
@@ -451,7 +466,7 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
   async function runScanPreview() {
     const request = buildScanRequest();
     if (!request) {
-      setNotice('스캔할 폴더 경로를 한 줄에 하나씩 입력하세요.');
+      setNotice('폴더 찾아보기를 눌러 스캔할 폴더를 먼저 추가하세요.');
       return;
     }
     setBusy(true);
@@ -479,7 +494,7 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
       task: 'initial_office_setup.analyze',
       status: 'queued',
       actor: '',
-      input_summary: companyProfile.company_name || message,
+      input_summary: message || '회사 폴더 자동 분석',
       used_sources: uploads.map((upload) => upload.path),
       result_path: '',
       error: '',
@@ -492,7 +507,10 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
         message,
         upload_ids: uploads.map((upload) => upload.id),
         intent: 'initial_office_setup',
-        company_profile: companyProfile,
+        company_profile: {
+          ...neutralCompanyProfile,
+          deployment_preference: llmChoice === 'api' ? 'api_allowed' : 'local_recommended',
+        },
         scan: buildScanRequest(),
       });
       setResult(analyzed);
@@ -773,47 +791,67 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
           </div>
         ) : null}
 
-        {step === 'profile' ? (
-          <ProfileStep
-            companyProfile={companyProfile}
-            setCompanyProfile={setCompanyProfile}
-            onContinue={() => setStep('files')}
-          />
-        ) : null}
-
-        {step === 'files' ? (
+        {step === 'data' ? (
           <div className="memory-form">
             <div className="panel-subsection">
-              <h3>회사 폴더 자동 스캔 (권장)</h3>
+              <h3>회사 폴더 선택</h3>
               <p className="muted">
-                회사 문서가 있는 폴더 경로를 알려주면 AI가 문서를 훑어보고 회사가 무슨 일을 하는지,
-                부서와 업무 흐름이 어떻게 되는지 초안을 만듭니다. 열면 안 되는 폴더는 제외 목록에 넣으세요.
-                비밀번호·인증서·설정 파일 등은 기본으로 항상 제외됩니다.
+                회사 문서가 있는 폴더를 고르면 AI가 문서를 읽고 회사가 무슨 일을 하는지, 부서와 업무 흐름이
+                어떻게 되는지 스스로 파악해 초안을 만듭니다. 열면 안 되는 폴더는 제외로 지정하세요 (여러 개 가능).
+                비밀번호·인증서·설정 파일은 항상 자동 제외됩니다.
               </p>
-              <label>
-                스캔할 폴더 (한 줄에 하나씩)
-                <textarea
-                  value={scanRoots}
-                  onChange={(e) => setScanRoots(e.target.value)}
-                  placeholder={'예:\nC:\\Users\\me\\Documents\\회사문서\nD:\\공유폴더\\업무자료'}
-                />
-              </label>
-              <label>
-                제외할 경로 (한 줄에 하나씩, 선택)
-                <textarea
-                  value={scanExcludes}
-                  onChange={(e) => setScanExcludes(e.target.value)}
-                  placeholder={'예:\nC:\\Users\\me\\Documents\\회사문서\\급여\n*계약서*'}
-                />
-              </label>
-              <label className="checkbox-inline">
-                <input
-                  type="checkbox"
-                  checked={scanAllowCloud}
-                  onChange={(e) => setScanAllowCloud(e.target.checked)}
-                />
-                로컬 LLM이 없어 스캔한 문서를 외부 API로 보내 분석하는 것에 동의합니다. (기본: 로컬 전용)
-              </label>
+              <FormActions>
+                <Button onClick={() => setShowFolderBrowser(true)}>폴더 찾아보기</Button>
+              </FormActions>
+              {scanRoots.length ? (
+                <div className="path-tag-list">
+                  {scanRoots.map((path) => (
+                    <div className="path-tag" key={path}>
+                      <span>📂 스캔</span>
+                      <code>{path}</code>
+                      <Button
+                        variant="secondary"
+                        onClick={() => setScanRoots(scanRoots.filter((item) => item !== path))}
+                      >
+                        삭제
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted">아직 선택한 폴더가 없습니다. [폴더 찾아보기]로 추가하세요.</p>
+              )}
+              {scanExcludes.length ? (
+                <div className="path-tag-list">
+                  {scanExcludes.map((path) => (
+                    <div className="path-tag excluded" key={path}>
+                      <span>🚫 제외</span>
+                      <code>{path}</code>
+                      <Button
+                        variant="secondary"
+                        onClick={() => setScanExcludes(scanExcludes.filter((item) => item !== path))}
+                      >
+                        삭제
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {llmChoice === 'api' ? (
+                <p className="muted">
+                  스캔한 문서는 선택하신 {provider.toUpperCase()} API로 분석됩니다. 분석 용도로만 사용되며,
+                  LLM 설정 단계에서 이미 동의하셔서 추가 확인은 필요 없습니다.
+                </p>
+              ) : (
+                <label className="checkbox-inline">
+                  <input
+                    type="checkbox"
+                    checked={scanAllowCloud}
+                    onChange={(e) => setScanAllowCloud(e.target.checked)}
+                  />
+                  로컬 LLM이 준비되지 않았다면, 스캔한 문서를 외부 API로 보내 분석하는 것에 동의합니다.
+                </label>
+              )}
               <FormActions>
                 <Button variant="secondary" disabled={busy} onClick={() => void runScanPreview()}>
                   스캔 미리보기
@@ -858,43 +896,90 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
               </div>
             </div>
             <FormActions>
-              <Button onClick={() => setStep('analyze')}>데이터 선택 완료</Button>
+              <Button
+                disabled={!scanRoots.length && !uploads.length}
+                onClick={() => setStep('analyze')}
+              >
+                데이터 선택 완료
+              </Button>
             </FormActions>
           </div>
         ) : null}
 
         {step === 'analyze' ? (
           <div className="memory-form">
+            <p className="muted">
+              선택한 폴더의 문서를 AI가 읽고, 이 회사가 무슨 일을 하는 회사인지 스스로 파악해서
+              회사 프로필과 운영 메모리 초안을 만듭니다. 원하시면 추가 요청을 남길 수 있습니다.
+            </p>
             <textarea
               value={message}
-              placeholder="예: 이 엑셀 파일의 직함을 보고 부서/역할/초기 업무 메모리를 정리해줘"
+              placeholder="(선택) 예: 생산/품질 쪽 업무 흐름을 특히 자세히 정리해줘"
               onChange={(e) => setMessage(e.target.value)}
             />
             <FormActions>
-              <Button disabled={busy} onClick={() => void analyze()}>AI로 초기 오피스 세팅 분석</Button>
+              <Button disabled={busy} onClick={() => void analyze()}>
+                {busy ? 'AI가 문서를 읽고 있습니다...' : 'AI 분석 시작'}
+              </Button>
             </FormActions>
+            {busy ? (
+              <p className="muted">추론형 모델은 1~3분 정도 걸릴 수 있습니다. 화면을 닫지 마세요.</p>
+            ) : null}
           </div>
         ) : null}
 
         {step === 'review' ? (
           <div className="memory-form">
-            <p className="muted">AI가 만든 초안을 검토한 뒤 적용하세요. 직원 로그인 계정은 자동 생성하지 않습니다.</p>
             {result?.provenance?.source === 'company_scan' ? (
               <article className="log-card">
-                <strong>회사 폴더 자동 스캔 결과로 만든 초안입니다</strong>
+                <strong>AI가 회사 폴더를 읽고 만든 초안입니다</strong>
                 <small>
-                  스캔 폴더: {result.provenance.roots.join(', ')} · 읽은 문서 {result.provenance.scanned_files}개 ·
-                  분석 경로: {result.provenance.route === 'local' ? '로컬 LLM (외부 전송 없음)' : '설정된 라우트'}
+                  읽은 문서 {result.provenance.scanned_files}개 · 분석 경로:{' '}
+                  {result.provenance.route === 'local' ? '로컬 LLM (외부 전송 없음)' : 'API 모델'}
                 </small>
-                <small>아래 항목은 AI가 문서를 보고 추론한 내용입니다. 회사와 다른 부분은 끄거나 적용 후 수정하세요.</small>
               </article>
             ) : null}
-            {result?.notes?.length ? (
-              <ul>{result.notes.map((note) => <li key={note} className="muted">{note}</li>)}</ul>
+            {result ? (
+              <div className="panel-subsection">
+                <h3>AI가 파악한 우리 회사</h3>
+                <p className="muted">읽어보고 맞으면 그대로 두고, 다른 부분만 [수정]을 눌러 고치세요. 고친 내용이 그대로 저장됩니다.</p>
+                <EditableFact
+                  label="회사 이름"
+                  value={String(result.operations_memory.company_name ?? '')}
+                  onSave={(value) => setResult({ ...result, operations_memory: { ...result.operations_memory, company_name: value } })}
+                />
+                <EditableFact
+                  label="무슨 일을 하는 회사인가"
+                  value={String(result.operations_memory.organization ?? '')}
+                  onSave={(value) => setResult({ ...result, operations_memory: { ...result.operations_memory, organization: value } })}
+                />
+                <EditableFact
+                  label="부서 구성"
+                  value={String(result.operations_memory.departments ?? '')}
+                  onSave={(value) => setResult({ ...result, operations_memory: { ...result.operations_memory, departments: value } })}
+                />
+                <EditableFact
+                  label="주요 업무 흐름"
+                  value={String(result.operations_memory.key_workflows ?? '')}
+                  onSave={(value) => setResult({ ...result, operations_memory: { ...result.operations_memory, key_workflows: value } })}
+                />
+                <EditableFact
+                  label="민감정보 취급 원칙"
+                  value={String(result.operations_memory.sensitive_policy ?? '')}
+                  onSave={(value) => setResult({ ...result, operations_memory: { ...result.operations_memory, sensitive_policy: value } })}
+                />
+              </div>
+            ) : null}
+            {result?.questions?.length ? (
+              <div className="panel-subsection">
+                <h3>⚠ AI가 확인을 요청한 항목</h3>
+                <ul>{result.questions.map((question) => <li key={question}>{question}</li>)}</ul>
+              </div>
             ) : null}
             {result?.warnings?.length ? (
               <ul>{result.warnings.map((warning) => <li key={warning} className="alert">{warning}</li>)}</ul>
             ) : null}
+            <p className="muted">아래 추천 구성은 필요 없는 항목을 끄고 적용할 수 있습니다. 직원 로그인 계정은 자동 생성하지 않습니다.</p>
             {result ? (
               <>
                 <ReviewToggle id="memory" label="운영/작업 메모리 적용" checked={applySections.memory} onChange={(id, checked) => setApplySections({ ...applySections, [id]: checked })} />
@@ -929,335 +1014,78 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
         {notice ? <p className="alert">{notice}</p> : null}
         <AiJobStatusBar job={aiJob} />
       </section>
+      {showFolderBrowser ? (
+        <FolderBrowserModal
+          roots={scanRoots}
+          excludes={scanExcludes}
+          onAddRoot={(path) =>
+            setScanRoots((current) => (current.includes(path) ? current : [...current, path]))
+          }
+          onAddExclude={(path) =>
+            setScanExcludes((current) => (current.includes(path) ? current : [...current, path]))
+          }
+          onClose={() => setShowFolderBrowser(false)}
+        />
+      ) : null}
     </main>
   );
 }
 
-type DepartmentId =
-  | 'executive'
-  | 'hr'
-  | 'finance'
-  | 'sales'
-  | 'marketing'
-  | 'cs'
-  | 'product_dev_it'
-  | 'legal'
-  | 'ops_procurement';
-
-type GoalId =
-  | 'meeting_notes'
-  | 'action_items'
-  | 'weekly_patch_notes'
-  | 'release_notes'
-  | 'integrated_search'
-  | 'customer_memory'
-  | 'proposal_docs';
-
-const DEPARTMENT_PACK_MAP: Record<DepartmentId, { name: string; description: string }> = {
-  executive: { name: 'CEO 브리핑 에이전트', description: '전사 패치 노트, KPI 이슈, 의사결정 로그를 요약합니다.' },
-  hr: { name: 'HR 에이전트', description: '채용공고, 면접 질문, 온보딩 체크리스트, 인사 규정 Q&A를 지원합니다.' },
-  finance: { name: '재무/회계 에이전트', description: '월말 보고, 비용 정리, 예산 초과 알림을 제안합니다.' },
-  sales: { name: '영업 에이전트', description: '미팅 요약, 제안서 초안, 파이프라인 요약을 지원합니다.' },
-  marketing: { name: '마케팅 에이전트', description: '캠페인 기획, 콘텐츠 작성, 리뷰 분석을 지원합니다.' },
-  cs: { name: 'CS 에이전트', description: '문의 분류, 답변 초안, FAQ 업데이트를 지원합니다.' },
-  product_dev_it: { name: '제품/개발/IT 에이전트', description: 'PRD, 릴리즈 노트, 버그 리포트, 포스트모템을 만듭니다.' },
-  legal: { name: '법무 보조 에이전트', description: '계약 요약, 표준 조항 비교, 규정 Q&A 보조 (사람 검토 전제).' },
-  ops_procurement: { name: '운영/구매 에이전트', description: '구매요청, 공급업체 비교, 운영 리포트를 지원합니다.' },
-};
-
-const GOAL_WORKFLOW_MAP: Record<GoalId, { name: string; description: string }> = {
-  meeting_notes: { name: '회의 자동 기록', description: '결정사항/반대 의견/담당자/기한 추출' },
-  action_items: { name: '액션아이템 자동 생성', description: '회의·문서·메시지에서 할 일/마감 추출' },
-  weekly_patch_notes: { name: '팀 패치 노트', description: '완료, 이슈, 결정, 다음주 계획 자동 정리' },
-  release_notes: { name: '릴리즈 노트 자동화', description: 'GitHub/Jira 변경사항으로 노트 생성' },
-  integrated_search: { name: '권한 기반 통합 검색', description: '문서/메시지/회의/채팅을 권한 인식으로 검색' },
-  customer_memory: { name: '고객/프로젝트 메모리', description: '고객별 히스토리·결정·담당자 맥락 기억' },
-  proposal_docs: { name: '제안서/보고서 자동화', description: '회의록·요구사항 기반 산출물 초안' },
-};
-
-const ORGANIZATION_OPTIONS: Array<[string, string]> = [
-  ['solo', '1인/프리랜서 — Patch Note Solo'],
-  ['startup', '스타트업/소규모 팀 — Patch Note Team'],
-  ['smb', '중소기업 — Patch Note Business'],
-  ['mid_market', '중견기업 — Patch Note Business'],
-  ['enterprise_public', '대기업/공공기관 — Patch Note Enterprise'],
-];
-
-function ProfileStep({
-  companyProfile,
-  setCompanyProfile,
-  onContinue,
+function EditableFact({
+  label,
+  value,
+  onSave,
 }: {
-  companyProfile: CompanyProfile;
-  setCompanyProfile: (next: CompanyProfile) => void;
-  onContinue: () => void;
+  label: string;
+  value: string;
+  onSave: (value: string) => void;
 }) {
-  const update = <K extends keyof CompanyProfile>(key: K, value: CompanyProfile[K]) => {
-    setCompanyProfile({ ...companyProfile, [key]: value });
-  };
-
-  const sensitiveSelected = companyProfile.data_sensitivity.some((value) =>
-    ['customer_info', 'hr_info', 'finance_info', 'medical_info', 'trade_secret'].includes(value),
-  );
-  const recommendedPackage = ORGANIZATION_OPTIONS.find(
-    ([id]) => id === companyProfile.organization_size,
-  )?.[1] ?? 'Patch Note Team';
-  const previewAgents = (companyProfile.departments as DepartmentId[])
-    .filter((id) => DEPARTMENT_PACK_MAP[id])
-    .slice(0, 6)
-    .map((id) => ({ id, ...DEPARTMENT_PACK_MAP[id] }));
-  const previewWorkflows = (companyProfile.primary_goals as GoalId[])
-    .filter((id) => GOAL_WORKFLOW_MAP[id])
-    .slice(0, 6)
-    .map((id) => ({ id, ...GOAL_WORKFLOW_MAP[id] }));
-
-  const canContinue = companyProfile.company_name.trim().length >= 1;
-
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
   return (
-    <div className="setup-profile-grid">
-      <div className="setup-profile-form">
-        <fieldset className="setup-option-group">
-          <legend>회사 정체성</legend>
-          <p className="muted">AI가 운영 메모리·문서·공지를 만들 때 회사 이름과 진행 중인 오피스 프로젝트를 기준으로 잡습니다.</p>
-          <label>
-            회사 이름
-            <input
-              value={companyProfile.company_name}
-              onChange={(event) => update('company_name', event.target.value)}
-              placeholder="예: Negotium Lab Co., Ltd."
-            />
-          </label>
-          <label>
-            현재 오피스 프로젝트 / 도입 목적
-            <input
-              value={companyProfile.office_project}
-              onChange={(event) => update('office_project', event.target.value)}
-              placeholder="예: 분기 회의/주간 보고 자동화 + 릴리즈 노트 정착"
-            />
-          </label>
-          <label>
-            우리 회사 업무 요약
-            <textarea
-              rows={3}
-              value={companyProfile.work_summary}
-              onChange={(event) => update('work_summary', event.target.value)}
-              placeholder="예: B2B SaaS, 영업/CS/제품팀 위주, 매주 릴리즈 + 월간 KPI 리뷰"
-            />
-          </label>
-        </fieldset>
-
-        <fieldset className="setup-option-group">
-          <legend>운영 환경</legend>
-          <label>
-            조직 규모 (추천 패키지가 자동 결정됩니다)
-            <select
-              value={companyProfile.organization_size}
-              onChange={(event) => update('organization_size', event.target.value)}
+    <article className="review-fact-card">
+      <div className="review-fact-head">
+        <strong>{label}</strong>
+        {editing ? (
+          <div className="review-fact-actions">
+            <Button
+              onClick={() => {
+                onSave(draft.trim());
+                setEditing(false);
+              }}
             >
-              {ORGANIZATION_OPTIONS.map(([id, label]) => (
-                <option key={id} value={id}>{label}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            배포 선호도
-            <select
-              value={companyProfile.deployment_preference}
-              onChange={(event) => update('deployment_preference', event.target.value)}
-            >
-              <option value="local_recommended">민감정보 보호: 로컬 에이전트 권장</option>
-              <option value="api_allowed">API 모델 사용 허용</option>
-              <option value="private_required">프라이빗/온프레미스 필요</option>
-            </select>
-          </label>
-          <OptionGroup
-            title="데이터 민감도"
-            values={companyProfile.data_sensitivity}
-            options={[
-              ['general', '일반 업무'],
-              ['customer_info', '고객정보'],
-              ['hr_info', '인사정보'],
-              ['finance_info', '금융/재무정보'],
-              ['medical_info', '의료정보'],
-              ['trade_secret', '영업비밀'],
-            ]}
-            onChange={(values) => update('data_sensitivity', values)}
-          />
-        </fieldset>
-
-        <fieldset className="setup-option-group">
-          <legend>업무 맥락</legend>
-          <p className="muted">아래 입력은 prompt에 그대로 들어가서, AI가 우리 회사에 맞는 운영 템플릿을 조립할 때 기준이 됩니다.</p>
-          <label>
-            반복적으로 일어나는 업무 / 회의
-            <textarea
-              rows={3}
-              value={companyProfile.recurring_workflows}
-              onChange={(event) => update('recurring_workflows', event.target.value)}
-              placeholder="예: 매주 월요일 영업 미팅, 격주 제품 리뷰, 매월 KPI 회의, 매주 릴리즈"
-            />
-          </label>
-          <label>
-            지금 사용하는 도구 / 연동하고 싶은 시스템
-            <textarea
-              rows={2}
-              value={companyProfile.current_tools}
-              onChange={(event) => update('current_tools', event.target.value)}
-              placeholder="예: Slack, Notion, Jira, GitHub, HubSpot, Google Drive"
-            />
-          </label>
-          <label>
-            변경사항 관리에서 가장 자주 놓치는 것
-            <textarea
-              rows={2}
-              value={companyProfile.change_management_needs}
-              onChange={(event) => update('change_management_needs', event.target.value)}
-              placeholder="예: 결정 사항이 누구에게 전달됐는지 모름, 릴리즈 후 변경점이 영업/CS에 안 흘러감"
-            />
-          </label>
-          <label>
-            우선 자동화하고 싶은 업무 (Top 1~3)
-            <textarea
-              rows={2}
-              value={companyProfile.automation_priorities}
-              onChange={(event) => update('automation_priorities', event.target.value)}
-              placeholder="예: 회의록 → 액션아이템, 주간 패치 노트, 릴리즈 노트, 고객별 미팅 요약"
-            />
-          </label>
-        </fieldset>
-
-        <OptionGroup
-          title="업종"
-          values={companyProfile.industries}
-          options={[
-            ['it_saas', 'IT/SaaS'],
-            ['b2b_sales_cs', 'B2B 영업/CS'],
-            ['professional_services', '전문서비스'],
-            ['manufacturing', '제조'],
-            ['construction', '건설'],
-            ['ecommerce', '도소매/이커머스'],
-            ['finance', '금융'],
-            ['healthcare', '의료/복지'],
-            ['public', '공공'],
-            ['education', '교육'],
-          ]}
-          onChange={(values) => update('industries', values)}
-        />
-        <OptionGroup
-          title="초기 타깃 부서"
-          values={companyProfile.departments}
-          options={[
-            ['executive', '경영진'],
-            ['hr', 'HR'],
-            ['finance', '재무'],
-            ['sales', '영업'],
-            ['marketing', '마케팅'],
-            ['cs', 'CS'],
-            ['product_dev_it', '제품/개발/IT'],
-            ['legal', '법무'],
-            ['ops_procurement', '운영/구매'],
-          ]}
-          onChange={(values) => update('departments', values)}
-        />
-        <OptionGroup
-          title="핵심 목적"
-          values={companyProfile.primary_goals}
-          options={[
-            ['meeting_notes', 'AI 회의록'],
-            ['action_items', '액션아이템 추출'],
-            ['weekly_patch_notes', '팀 패치 노트'],
-            ['release_notes', '릴리즈 노트 자동화'],
-            ['integrated_search', '통합 검색'],
-            ['customer_memory', '고객/프로젝트 메모리'],
-            ['proposal_docs', '제안서/보고서'],
-          ]}
-          onChange={(values) => update('primary_goals', values)}
-        />
-
-        <div className="form-actions">
-          <button type="button" disabled={!canContinue} onClick={onContinue}>
-            회사 프로파일 저장 후 계속
-          </button>
-          {!canContinue ? <span className="muted">회사 이름을 입력하면 다음 단계로 넘어갑니다.</span> : null}
-        </div>
+              저장
+            </Button>
+            <Button variant="secondary" onClick={() => setEditing(false)}>취소</Button>
+          </div>
+        ) : (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setDraft(value);
+              setEditing(true);
+            }}
+          >
+            수정
+          </Button>
+        )}
       </div>
-
-      <aside className="setup-profile-side">
-        <article className="panel setup-side-card">
-          <p className="eyebrow">AI가 이 입력으로 만드는 것</p>
-          <h3>{recommendedPackage}</h3>
-          <p className="muted">
-            지금 입력한 회사 정체성·업무 맥락·민감도를 바탕으로, AI가 운영 메모리, 추천 에이전트 팩, 템플릿, 워크플로우, 보안 기본값,
-            14일 실행안을 한 번에 조립해서 검토 단계에서 보여줍니다.
-          </p>
-          <ol className="setup-side-steps">
-            <li>회사 정체성 → 운영 메모리 (`company_name`, `office_project`, `key_workflows`)</li>
-            <li>업무 맥락 → 첫 14일 실행안과 추천 워크플로우</li>
-            <li>부서/업종/목적 → 에이전트 팩 + 산업 템플릿</li>
-            <li>민감도 → 보안 기본값과 LLM 라우팅 (로컬/외부)</li>
-          </ol>
-        </article>
-
-        <article className="panel setup-side-card">
-          <p className="eyebrow">선택한 부서 기준 추천 에이전트</p>
-          {previewAgents.length === 0 ? (
-            <p className="muted">초기 타깃 부서를 1개 이상 선택하세요.</p>
-          ) : (
-            <ul className="setup-side-list">
-              {previewAgents.map((agent) => (
-                <li key={agent.id}>
-                  <strong>{agent.name}</strong>
-                  <span>{agent.description}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </article>
-
-        <article className="panel setup-side-card">
-          <p className="eyebrow">핵심 목적 기준 운영 템플릿</p>
-          {previewWorkflows.length === 0 ? (
-            <p className="muted">핵심 목적을 1개 이상 선택하세요.</p>
-          ) : (
-            <ul className="setup-side-list">
-              {previewWorkflows.map((workflow) => (
-                <li key={workflow.id}>
-                  <strong>{workflow.name}</strong>
-                  <span>{workflow.description}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </article>
-
-        <article className={sensitiveSelected ? 'panel setup-side-card alert-card' : 'panel setup-side-card'}>
-          <p className="eyebrow">신뢰 가능한 기본값</p>
-          <ul className="setup-side-list">
-            <li><strong>출처 표시</strong><span>모든 AI 답변에 근거 문서 링크 표시</span></li>
-            <li><strong>권한 인식 검색</strong><span>사용자 권한 안에서만 RAG로 답변</span></li>
-            <li><strong>감사 로그</strong><span>검색·생성·수정·삭제 기록 보존</span></li>
-            <li><strong>고위험 업무 사람 검토</strong><span>채용/평가/법률/금융/의료 자동 판단 금지</span></li>
-            {sensitiveSelected ? (
-              <li>
-                <strong>민감정보 감지</strong>
-                <span>로컬 에이전트 우선, 외부 API 사용 시 사용자 동의 필요</span>
-              </li>
-            ) : null}
-          </ul>
-        </article>
-      </aside>
-    </div>
+      {editing ? (
+        <textarea rows={3} value={draft} onChange={(e) => setDraft(e.target.value)} />
+      ) : (
+        <p>{value || <span className="muted">문서에서 찾지 못했습니다 — 직접 입력해 주세요.</span>}</p>
+      )}
+    </article>
   );
 }
 
 function StepBar({ step }: { step: Step }) {
   const steps: Array<[Step, string]> = [
     ['admin', '관리자'],
-    ['llm', 'LLM'],
-    ['profile', '프로파일'],
-    ['files', '파일'],
+    ['llm', 'AI 엔진'],
+    ['data', '회사 데이터'],
     ['analyze', 'AI 분석'],
-    ['review', '적용'],
+    ['review', '확인 · 적용'],
   ];
   const activeIndex = steps.findIndex(([id]) => id === step);
   return (
@@ -1268,37 +1096,6 @@ function StepBar({ step }: { step: Step }) {
         </span>
       ))}
     </div>
-  );
-}
-
-function OptionGroup({
-  title,
-  values,
-  options,
-  onChange,
-}: {
-  title: string;
-  values: string[];
-  options: Array<[string, string]>;
-  onChange: (values: string[]) => void;
-}) {
-  return (
-    <fieldset className="setup-option-group">
-      <legend>{title}</legend>
-      {options.map(([id, label]) => (
-        <label className="checkbox-inline" key={id}>
-          <input
-            type="checkbox"
-            checked={values.includes(id)}
-            onChange={(event) => {
-              const next = event.target.checked ? [...values, id] : values.filter((value) => value !== id);
-              onChange(next.length ? next : [id]);
-            }}
-          />
-          {label}
-        </label>
-      ))}
-    </fieldset>
   );
 }
 

@@ -25,4 +25,5 @@ workspaces/
 .vscode/
 
 # Runtime data (user PII, job logs, generated documents) — never commit
-archive/
+# Root-anchored: negotium/archive/ is source code and must stay tracked.
+/archive/

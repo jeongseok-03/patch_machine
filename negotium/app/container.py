@@ -29,6 +29,7 @@ from negotium.archive.agent_execution import AgentExecutionStore
 from negotium.archive.ai_jobs import AiJobStore
 from negotium.archive.audit_log import AuditLogStore
 from negotium.archive.auth_store import AuthStore
+from negotium.archive.company_knowledge import CompanyKnowledgeStore
 from negotium.archive.context_compressor import CompressedContextStore
 from negotium.archive.context_firewall import ContextFirewallStore
 from negotium.archive.conversation_store import ConversationStore
@@ -67,6 +68,7 @@ class Container:
     repo_snapshot: RepoSnapshotService
     retriever: MarkdownRetriever
     operations_memory: OperationsMemoryStore
+    company_knowledge: CompanyKnowledgeStore
     ai_jobs: AiJobStore
     llm_runtime: LlmRuntimeStore
     access_control: AccessControlStore
@@ -120,6 +122,7 @@ class Container:
 
         archive = ArchiveWriter(settings.archive_dir)
         operations_memory = OperationsMemoryStore(settings.archive_dir)
+        company_knowledge = CompanyKnowledgeStore(settings.archive_dir)
         ai_jobs = AiJobStore(settings.archive_dir)
         llm_runtime = LlmRuntimeStore(settings.archive_dir)
         access_control = AccessControlStore(settings.archive_dir)
@@ -205,6 +208,7 @@ class Container:
             repo_snapshot=repo_snapshot,
             retriever=retriever,
             operations_memory=operations_memory,
+            company_knowledge=company_knowledge,
             ai_jobs=ai_jobs,
             llm_runtime=llm_runtime,
             access_control=access_control,

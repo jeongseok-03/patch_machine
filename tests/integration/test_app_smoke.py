@@ -922,16 +922,20 @@ def test_initial_office_setup_analyze_and_apply(tmp_path: Path) -> None:
     )
     container.llm = FakeLlmProvider(
         responses=[
+            # 1st call: batched per-file summaries (keyed by filename fallback).
+            ScriptedResponse(
+                text='{"employees.csv": "직원 명단: 급여 담당 Alice 운영 매니저"}',
+            ),
+            # 2nd call: synthesis of the company profile.
             ScriptedResponse(
                 text="""{
-  "operations_memory": {"company_name": "Acme", "organization": "Ops", "roles": "대표, 매니저"},
-  "work_memory": {"goals": "초기 세팅"},
-  "roles": [{"id": "ops_manager", "name": "운영 매니저", "level": 70, "permissions": ["work:read"]}],
-  "users": [{"id": "alice", "display_name": "Alice", "title": "운영 매니저", "role_id": "ops_manager", "active": true}],
-  "notes": ["parsed"],
-  "warnings": [],
-  "questions": [],
-  "sensitive_hint": true
+  "company_name": "Acme",
+  "organization": "직원 명단 문서를 근거로 운영 조직을 갖춘 회사로 보입니다.",
+  "departments": "운영",
+  "roles": "운영 매니저",
+  "key_workflows": "인사 명단 관리",
+  "sensitive_policy": "급여 정보는 로컬에서만 처리",
+  "questions": ["회사 이름이 정확한가요?"]
 }""",
             ),
         ],
@@ -946,7 +950,7 @@ def test_initial_office_setup_analyze_and_apply(tmp_path: Path) -> None:
             files={
                 "file": (
                     "employees.csv",
-                    b"name,title\nAlice,\xec\x9a\xb4\xec\x98\x81 \xeb\xa7\xa4\xeb\x8b\x88\xec\xa0\x80\n",
+                    "name,title\nAlice,급여 담당 운영 매니저\n".encode(),
                     "text/csv",
                 )
             },
@@ -962,12 +966,14 @@ def test_initial_office_setup_analyze_and_apply(tmp_path: Path) -> None:
 
     assert uploaded.status_code == 200
     assert analyzed.status_code == 200
-    assert analyzed.json()["sensitive_hint"] is True
-    assert "로컬 에이전트 서버" in "\n".join(analyzed.json()["warnings"])
+    body = analyzed.json()
+    assert body["sensitive_hint"] is True
+    assert "로컬 에이전트 서버" in "\n".join(body["warnings"])
+    assert "회사 이름이 정확한가요?" in body["questions"]
     assert applied.status_code == 200
     assert container.operations_memory.read().company_name == "Acme"
-    users = {user["id"]: user for user in container.access_control.read()["users"]}
-    assert users["alice"]["role_id"] == "ops_manager"
+    # Per-file summaries are cached for cheap re-analysis later.
+    assert container.company_knowledge.file_summaries()
 
 
 def test_hr_evaluation_context_draft_and_save(tmp_path: Path) -> None:

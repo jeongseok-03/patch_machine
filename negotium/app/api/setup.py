@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Header, HTTPException
 
 from negotium.app.api._shared import (
@@ -10,13 +12,13 @@ from negotium.app.api._shared import (
     _audit,
     _complete_office_task,
     _finish_ai_job,
-    _initial_office_setup_prompt,
     _initial_setup_memories_with_recommendations,
     _parse_initial_setup_result,
     _require,
     _selected_upload_records,
     _start_ai_job,
 )
+from negotium.app.company_analysis import analyze_company_documents
 from negotium.app.company_scan import (
     ScanConfig,
     ScanReport,
@@ -87,28 +89,34 @@ def create_setup_router(container: Container) -> APIRouter:
         force_local = False
         if payload.scan and payload.scan.root_paths:
             scan_report = _run_company_scan(payload.scan)
-            parsed_files = [*parsed_files, *parse_scanned_files(scan_report)]
+            parsed_files = [
+                *parsed_files,
+                *parse_scanned_files(scan_report, max_files=320, max_total_chars=800_000),
+            ]
             force_local = not payload.scan.allow_cloud
-        prompt = _initial_office_setup_prompt(
-            message=payload.message,
-            intent=payload.intent,
-            parsed_files=parsed_files,
-            company_profile=payload.company_profile,
-        )
         job = _start_ai_job(
             container,
             task="initial_office_setup.analyze",
             actor=actor,
-            input_summary=payload.message or payload.company_profile.company_name,
+            input_summary=payload.message or "회사 문서 자동 분석",
             used_sources=[str(item.path) for item in parsed_files],
         )
-        try:
-            markdown = await _complete_office_task(
+
+        async def _complete(prompt: str, max_tokens: int) -> str:
+            return await _complete_office_task(
                 container,
                 prompt,
                 task="memory_summary",
                 force_local=force_local,
-                max_tokens=12000,
+                max_tokens=max_tokens,
+            )
+
+        try:
+            analysis = await analyze_company_documents(
+                parsed_files,
+                store=container.company_knowledge,
+                complete=_complete,
+                extra_request=payload.message,
             )
             job = _finish_ai_job(
                 container,
@@ -119,8 +127,23 @@ def create_setup_router(container: Container) -> APIRouter:
         except Exception as exc:
             _finish_ai_job(container, job, status="failed", error=str(exc))
             raise
+        profile = analysis.profile
+        draft = {
+            "operations_memory": {
+                "company_name": profile.get("company_name", ""),
+                "organization": profile.get("organization", ""),
+                "departments": profile.get("departments", ""),
+                "roles": profile.get("roles", ""),
+                "key_workflows": profile.get("key_workflows", ""),
+                "sensitive_policy": profile.get("sensitive_policy", ""),
+            },
+            "work_memory": {},
+            "notes": list(analysis.notes),
+            "warnings": [],
+            "questions": list(profile.get("questions") or []),
+        }
         result = _parse_initial_setup_result(
-            markdown,
+            json.dumps(draft, ensure_ascii=False),
             parsed_files=parsed_files,
             company_profile=payload.company_profile,
         )
@@ -134,12 +157,10 @@ def create_setup_router(container: Container) -> APIRouter:
                 "skipped": scan_report.skipped_counts,
                 "truncated": scan_report.truncated,
                 "route": "local" if force_local else "configured",
+                "summarized_files": analysis.summarized_files,
+                "cached_files": analysis.cached_files,
+                "deferred_files": analysis.deferred_files,
             }
-            result.notes = [
-                *result.notes,
-                "이 초안은 회사 폴더 자동 스캔 결과를 바탕으로 AI가 추론한 내용입니다. "
-                "적용 전에 각 항목을 확인해 주세요.",
-            ]
         return result
 
     @router.post("/setup/office/apply")

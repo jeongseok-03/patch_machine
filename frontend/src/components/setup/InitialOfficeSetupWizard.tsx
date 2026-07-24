@@ -19,7 +19,6 @@ import {
   type LlmProviderName,
   type OfficeScanReport,
   type OfficeScanRequest,
-  type PatchNoteRecommendationItem,
   type ProviderModelPayload,
   type UploadRecord,
 } from '../../api';
@@ -37,7 +36,6 @@ type Props = {
 
 type Step = 'admin' | 'llm' | 'data' | 'analyze' | 'review';
 type LlmChoice = 'local' | 'api';
-type ReviewSection = 'memory' | 'agents' | 'templates' | 'workflows' | 'security' | 'integrations' | 'routes';
 
 const recommendedLocalModels = [
   {
@@ -239,15 +237,6 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
   const [busy, setBusy] = useState(false);
   const [aiJob, setAiJob] = useState<AiJobStatus | null>(null);
   const [apiRiskAccepted, setApiRiskAccepted] = useState(savedDraft?.apiRiskAccepted || false);
-  const [applySections, setApplySections] = useState<Record<ReviewSection, boolean>>({
-    memory: true,
-    agents: true,
-    templates: true,
-    workflows: true,
-    security: true,
-    integrations: true,
-    routes: true,
-  });
 
   useEffect(() => {
     saveSetupDraft({
@@ -538,7 +527,7 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
     setBusy(true);
     setNotice('');
     try {
-      await applyInitialOfficeSetup(approvedResult(result, applySections));
+      await applyInitialOfficeSetup(memoryOnlyResult(result));
       clearSetupDraft();
       onAuthenticated(sessionUser);
     } catch (err) {
@@ -979,34 +968,8 @@ export default function InitialOfficeSetupWizard({ onAuthenticated, initialUser 
             {result?.warnings?.length ? (
               <ul>{result.warnings.map((warning) => <li key={warning} className="alert">{warning}</li>)}</ul>
             ) : null}
-            <p className="muted">아래 추천 구성은 필요 없는 항목을 끄고 적용할 수 있습니다. 직원 로그인 계정은 자동 생성하지 않습니다.</p>
-            {result ? (
-              <>
-                <ReviewToggle id="memory" label="운영/작업 메모리 적용" checked={applySections.memory} onChange={(id, checked) => setApplySections({ ...applySections, [id]: checked })} />
-                <article className="log-card">
-                  <strong>{result.recommended_package}</strong>
-                  <small>{JSON.stringify(result.workspace_profile)}</small>
-                </article>
-                <ReviewToggle id="agents" label="추천 에이전트 팩 적용" checked={applySections.agents} onChange={(id, checked) => setApplySections({ ...applySections, [id]: checked })} />
-                <RecommendationList items={result.agent_packs} />
-                <ReviewToggle id="templates" label="추천 템플릿 적용" checked={applySections.templates} onChange={(id, checked) => setApplySections({ ...applySections, [id]: checked })} />
-                <RecommendationList items={result.templates} />
-                <ReviewToggle id="workflows" label="추천 워크플로우 적용" checked={applySections.workflows} onChange={(id, checked) => setApplySections({ ...applySections, [id]: checked })} />
-                <RecommendationList items={result.workflows} />
-                <ReviewToggle id="security" label="보안 기본값 적용" checked={applySections.security} onChange={(id, checked) => setApplySections({ ...applySections, [id]: checked })} />
-                <RecommendationList items={result.security_defaults} />
-                <ReviewToggle id="integrations" label="연동 우선순위 적용" checked={applySections.integrations} onChange={(id, checked) => setApplySections({ ...applySections, [id]: checked })} />
-                <RecommendationList items={result.integration_priorities} />
-                <ReviewToggle id="routes" label="LLM 라우팅 추천 적용" checked={applySections.routes} onChange={(id, checked) => setApplySections({ ...applySections, [id]: checked })} />
-                <pre>{JSON.stringify(result.llm_task_routes, null, 2)}</pre>
-                <h3>첫 14일 실행안</h3>
-                <ul>{result.first_14_days.map((item) => <li key={item}>{item}</li>)}</ul>
-                <h3>사람 검토 필수</h3>
-                <ul>{result.human_review_required.map((item) => <li key={item}>{item}</li>)}</ul>
-              </>
-            ) : null}
             <FormActions>
-              <Button disabled={busy} onClick={() => void apply()}>검토 완료 · 초기 세팅 적용</Button>
+              <Button disabled={busy} onClick={() => void apply()}>맞아요 · 이대로 시작하기</Button>
             </FormActions>
           </div>
         ) : null}
@@ -1099,55 +1062,17 @@ function StepBar({ step }: { step: Step }) {
   );
 }
 
-function ReviewToggle({
-  id,
-  label,
-  checked,
-  onChange,
-}: {
-  id: ReviewSection;
-  label: string;
-  checked: boolean;
-  onChange: (id: ReviewSection, checked: boolean) => void;
-}) {
-  return (
-    <label className="checkbox-inline">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(id, event.target.checked)}
-      />
-      {label}
-    </label>
-  );
-}
-
-function RecommendationList({ items }: { items: PatchNoteRecommendationItem[] }) {
-  if (!items.length) {
-    return <p className="muted">추천 항목 없음</p>;
-  }
-  return (
-    <div className="log-list">
-      {items.map((item) => (
-        <article className="log-card" key={item.id || item.name}>
-          <strong>{item.name || item.id}</strong>
-          <small>{item.description || item.reason || item.priority || ''}</small>
-        </article>
-      ))}
-    </div>
-  );
-}
-
-function approvedResult(result: InitialOfficeSetupResult, sections: Record<ReviewSection, boolean>): InitialOfficeSetupResult {
+// Apply only what the admin actually reviewed: the AI-inferred company
+// memory. Recommendation blobs would pollute it with marketing markdown.
+function memoryOnlyResult(result: InitialOfficeSetupResult): InitialOfficeSetupResult {
   return {
     ...result,
-    operations_memory: sections.memory ? result.operations_memory : {},
-    work_memory: sections.memory ? result.work_memory : {},
-    agent_packs: sections.agents ? result.agent_packs : [],
-    templates: sections.templates ? result.templates : [],
-    workflows: sections.workflows ? result.workflows : [],
-    security_defaults: sections.security ? result.security_defaults : [],
-    integration_priorities: sections.integrations ? result.integration_priorities : [],
-    llm_task_routes: sections.routes ? result.llm_task_routes : {},
+    agent_packs: [],
+    templates: [],
+    workflows: [],
+    security_defaults: [],
+    integration_priorities: [],
+    llm_task_routes: {},
+    first_14_days: [],
   };
 }

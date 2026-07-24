@@ -76,3 +76,71 @@ export function summarizeChannel(channelId: string): Promise<{ summary: string }
     method: 'POST',
   });
 }
+
+export type MailAccountInfo = {
+  configured: boolean;
+  email?: string;
+  imap_host?: string;
+  imap_port?: number;
+  smtp_host?: string;
+  smtp_port?: number;
+  username?: string;
+  password?: string;
+};
+
+export type MailSummary = {
+  uid: string;
+  subject: string;
+  from: string;
+  date: string;
+  snippet: string;
+};
+
+export type MailDetail = MailSummary & { to: string; body: string };
+
+export type MailTriage = { reply_needed: string[]; fyi: string[]; summary: string };
+
+export function fetchMailAccount(): Promise<MailAccountInfo> {
+  return requestJson<MailAccountInfo>('/api/workspace/mail/account');
+}
+
+export function saveMailAccount(payload: {
+  email: string;
+  imap_host: string;
+  imap_port: number;
+  smtp_host: string;
+  smtp_port: number;
+  username?: string;
+  password: string;
+}): Promise<MailAccountInfo> {
+  return requestJson<MailAccountInfo>('/api/workspace/mail/account', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchMailInbox(): Promise<{ items: MailSummary[] }> {
+  return requestJson<{ items: MailSummary[] }>('/api/workspace/mail/inbox');
+}
+
+export function fetchMailMessage(uid: string): Promise<MailDetail> {
+  return requestJson<MailDetail>(`/api/workspace/mail/message/${uid}`);
+}
+
+export function triageMail(): Promise<MailTriage> {
+  return requestJson<MailTriage>('/api/workspace/mail/triage', { method: 'POST' });
+}
+
+export function draftMailReply(uid: string): Promise<{ draft: string; to: string; subject: string }> {
+  return requestJson<{ draft: string; to: string; subject: string }>('/api/workspace/mail/reply-draft', {
+    method: 'POST',
+    body: JSON.stringify({ uid }),
+  });
+}
+
+export function sendMailMessage(payload: { to: string; subject: string; body: string }): Promise<{ ok: boolean }> {
+  return requestJson<{ ok: boolean }>('/api/workspace/mail/send', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}

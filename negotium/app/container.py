@@ -40,6 +40,7 @@ from negotium.archive.hr_evaluations import HrEvaluationStore
 from negotium.archive.integration_config import IntegrationConfigStore
 from negotium.archive.issue_memory import IssueMemoryStore
 from negotium.archive.llm_runtime import LlmRuntimeStore
+from negotium.archive.mail_accounts import MailAccountStore
 from negotium.archive.mcp_audit import McpAuditStore
 from negotium.archive.mcp_sessions import McpSessionStore
 from negotium.archive.memory_schema import MemorySchemaStore
@@ -73,6 +74,7 @@ class Container:
     company_knowledge: CompanyKnowledgeStore
     announcements: AnnouncementStore
     chat: ChatStore
+    mail_accounts: MailAccountStore
     ai_jobs: AiJobStore
     llm_runtime: LlmRuntimeStore
     access_control: AccessControlStore
@@ -154,6 +156,10 @@ class Container:
             settings.archive_dir,
             master_key=_resolve_secret_key(settings),
         )
+        mail_accounts = MailAccountStore(
+            settings.archive_dir,
+            master_key=_resolve_secret_key(settings),
+        )
         token_usage = TokenUsageStore(settings.archive_dir)
         uploads = UploadStore(settings.archive_dir)
         volatile_memory = VolatileMemoryStore(settings.archive_dir)
@@ -217,6 +223,7 @@ class Container:
             company_knowledge=company_knowledge,
             announcements=announcements,
             chat=chat,
+            mail_accounts=mail_accounts,
             ai_jobs=ai_jobs,
             llm_runtime=llm_runtime,
             access_control=access_control,

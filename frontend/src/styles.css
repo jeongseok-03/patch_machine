@@ -3954,3 +3954,28 @@ button.ghost {
     grid-template-columns: 1fr;
   }
 }
+
+/* ----- Mail ----- */
+.mail-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mail-badge {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.mail-badge.reply {
+  background: var(--viz-late);
+  color: #fff;
+}
+
+.mail-badge.fyi {
+  background: var(--surface-muted);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}

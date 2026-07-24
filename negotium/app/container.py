@@ -30,6 +30,7 @@ from negotium.archive.ai_jobs import AiJobStore
 from negotium.archive.announcements import AnnouncementStore
 from negotium.archive.audit_log import AuditLogStore
 from negotium.archive.auth_store import AuthStore
+from negotium.archive.chat_store import ChatStore
 from negotium.archive.company_knowledge import CompanyKnowledgeStore
 from negotium.archive.context_compressor import CompressedContextStore
 from negotium.archive.context_firewall import ContextFirewallStore
@@ -71,6 +72,7 @@ class Container:
     operations_memory: OperationsMemoryStore
     company_knowledge: CompanyKnowledgeStore
     announcements: AnnouncementStore
+    chat: ChatStore
     ai_jobs: AiJobStore
     llm_runtime: LlmRuntimeStore
     access_control: AccessControlStore
@@ -126,6 +128,7 @@ class Container:
         operations_memory = OperationsMemoryStore(settings.archive_dir)
         company_knowledge = CompanyKnowledgeStore(settings.archive_dir)
         announcements = AnnouncementStore(settings.archive_dir)
+        chat = ChatStore(settings.archive_dir)
         ai_jobs = AiJobStore(settings.archive_dir)
         llm_runtime = LlmRuntimeStore(settings.archive_dir)
         access_control = AccessControlStore(settings.archive_dir)
@@ -213,6 +216,7 @@ class Container:
             operations_memory=operations_memory,
             company_knowledge=company_knowledge,
             announcements=announcements,
+            chat=chat,
             ai_jobs=ai_jobs,
             llm_runtime=llm_runtime,
             access_control=access_control,

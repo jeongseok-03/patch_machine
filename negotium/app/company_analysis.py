@@ -346,8 +346,9 @@ async def answer_company_question(
     store: CompanyKnowledgeStore,
     complete: CompleteFn,
     read_file: ReadFileFn,
+    chat_matches: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
-    """Answer a question from company documents, citing sources."""
+    """Answer a question from company documents (and chat history), citing sources."""
 
     summaries = {
         path: str(entry.get("summary") or "") for path, entry in store.file_summaries().items()
@@ -356,16 +357,24 @@ async def answer_company_question(
     if not ranked:
         ranked = list(summaries.keys())[:4]
     files = [item for item in (read_file(path) for path in ranked) if item is not None]
-    if not files:
+    if not files and not chat_matches:
         return None
     profile = store.company_profile()
+    chat_block = ""
+    if chat_matches:
+        chat_lines = "\n".join(
+            f"[{m.get('channel_name', '')}] {m.get('author_name')}: {m.get('text')}"
+            for m in chat_matches
+        )
+        chat_block = f"\n사내 메신저 대화 중 관련 기록:\n{chat_lines}\n"
     prompt = (
         "당신은 이 회사의 문서를 모두 알고 있는 사내 AI입니다.\n"
         f"회사 소개: {profile.get('organization', '')}\n\n"
         "아래 문서 내용만 근거로 질문에 답하세요. 문서에 없는 내용은 지어내지 말고 "
         '"문서에서 찾지 못했습니다"라고 답하세요.\n'
         'JSON 객체로만 답하세요: {"answer": "한국어 답변 (짧고 구체적으로)", "sources": ["실제 근거로 쓴 문서 경로"]}\n\n'
-        f"질문: {question}\n\n"
+        f"질문: {question}\n"
+        f"{chat_block}\n"
         f"문서:\n{_doc_blocks(files)}"
     )
     parsed = _parse_json_object(await complete(prompt, ANSWER_MAX_TOKENS))

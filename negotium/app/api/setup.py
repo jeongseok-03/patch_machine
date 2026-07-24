@@ -377,6 +377,7 @@ def create_setup_router(container: Container) -> APIRouter:
             store=container.company_knowledge,
             complete=_office_complete(not _cloud_allowed()),
             read_file=_read_scanned,  # type: ignore[arg-type]
+            chat_matches=container.chat.search_messages(question),
         )
         if result is None:
             raise HTTPException(

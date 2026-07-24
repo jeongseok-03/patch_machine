@@ -16,6 +16,7 @@ import { hasIncompleteInitialSetupDraft } from './components/setup/setupDraft';
 // active page's chunk loads on demand.
 const AccessControlPage = lazy(() => import('./components/AccessControlPage'));
 const CompanyAskPage = lazy(() => import('./components/CompanyAskPage'));
+const MessengerPage = lazy(() => import('./components/MessengerPage'));
 const AdminSettingsPage = lazy(() => import('./components/AdminSettingsPage'));
 const AuthPage = lazy(() => import('./components/AuthPage'));
 const ContributorGuide = lazy(() => import('./components/ContributorGuide'));
@@ -57,6 +58,7 @@ const emptyMemory: OperationsMemory = {
 type Page =
   | 'home'
   | 'ask'
+  | 'messenger'
   | 'profile'
   | 'dashboard'
   | 'chat'
@@ -84,6 +86,7 @@ type NavItem = { id: Page; label: string; group: string; requiredPermission?: st
 const navItems: NavItem[] = [
   { id: 'home', label: '홈', group: '사이트' },
   { id: 'profile', label: '유저 프로필', group: '사이트' },
+  { id: 'messenger', label: '메신저', group: '업무' },
   { id: 'ask', label: '회사에 물어보기', group: '업무', requiredPermission: 'llm:chat' },
   { id: 'work', label: '업무 현황', group: '업무' },
   { id: 'documents', label: '문서 만들기', group: '업무' },
@@ -237,6 +240,9 @@ export default function App() {
     }
     if (activePage === 'profile') {
       return <UserProfilePage user={currentUser!} />;
+    }
+    if (activePage === 'messenger') {
+      return <MessengerPage user={currentUser!} />;
     }
     if (activePage === 'dashboard') {
       return (

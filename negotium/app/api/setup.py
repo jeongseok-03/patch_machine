@@ -267,9 +267,62 @@ def create_setup_router(container: Container) -> APIRouter:
         x_ng_user: str | None = Header(default=None, alias="X-NG-User"),
     ) -> dict[str, object]:
         _require(container, x_ng_user, "admin:users")
-        return container.company_knowledge.latest_report()
+        report = container.company_knowledge.latest_report()
+        schedule = container.company_knowledge.report_schedule()
+        return {
+            "report": report,
+            "schedule": schedule,
+            "is_due": _report_is_due(schedule, report),
+        }
+
+    @router.get("/setup/office/report/schedule")
+    async def get_report_schedule(
+        x_ng_user: str | None = Header(default=None, alias="X-NG-User"),
+    ) -> dict[str, object]:
+        _require(container, x_ng_user, "admin:users")
+        return container.company_knowledge.report_schedule()
+
+    @router.put("/setup/office/report/schedule")
+    async def put_report_schedule(
+        payload: dict[str, str],
+        x_ng_user: str | None = Header(default=None, alias="X-NG-User"),
+    ) -> dict[str, object]:
+        actor = _require(container, x_ng_user, "admin:users")
+        interval = str(payload.get("interval") or "off")
+        if interval not in REPORT_INTERVALS:
+            raise HTTPException(
+                status_code=400, detail="interval은 off/monthly/quarterly/semiannual 중 하나입니다."
+            )
+        schedule = {**container.company_knowledge.report_schedule(), "interval": interval}
+        container.company_knowledge.store_report_schedule(schedule)
+        _audit(
+            container,
+            actor=actor,
+            action="setup.office.report_schedule",
+            target="company_report",
+            details={"interval": interval},
+        )
+        return schedule
 
     return router
+
+
+REPORT_INTERVALS: dict[str, int] = {"off": 0, "monthly": 30, "quarterly": 91, "semiannual": 182}
+
+
+def _report_is_due(schedule: dict[str, object], report: dict[str, object]) -> bool:
+    interval = str(schedule.get("interval") or "off")
+    days = REPORT_INTERVALS.get(interval, 0)
+    if days <= 0:
+        return False
+    created = str(report.get("created_at") or "")
+    if not created:
+        return True
+    try:
+        last = datetime.fromisoformat(created)
+    except ValueError:
+        return True
+    return (datetime.now(UTC) - last).days >= days
 
 
 def _run_company_scan(payload: OfficeScanRequest) -> ScanReport:

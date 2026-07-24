@@ -26,12 +26,27 @@ export type CompanyReport = {
   created_at?: string;
 };
 
+export type ReportInterval = 'off' | 'monthly' | 'quarterly' | 'semiannual';
+
+export type CompanyReportStatus = {
+  report: CompanyReport;
+  schedule: { interval?: ReportInterval };
+  is_due: boolean;
+};
+
 export function generateCompanyReport(): Promise<CompanyReport> {
   return requestJson<CompanyReport>('/api/setup/office/report/generate', { method: 'POST' });
 }
 
-export function fetchLatestCompanyReport(): Promise<CompanyReport> {
-  return requestJson<CompanyReport>('/api/setup/office/report/latest');
+export function fetchCompanyReportStatus(): Promise<CompanyReportStatus> {
+  return requestJson<CompanyReportStatus>('/api/setup/office/report/latest');
+}
+
+export function saveReportSchedule(interval: ReportInterval): Promise<{ interval?: ReportInterval }> {
+  return requestJson<{ interval?: ReportInterval }>('/api/setup/office/report/schedule', {
+    method: 'PUT',
+    body: JSON.stringify({ interval }),
+  });
 }
 
 export function previewOfficeScan(payload: OfficeScanRequest): Promise<OfficeScanReport> {

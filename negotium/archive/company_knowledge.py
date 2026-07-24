@@ -83,6 +83,17 @@ class CompanyKnowledgeStore:
         payload["updated_at"] = datetime.now(UTC).isoformat()
         write_json_file(self._path, payload)
 
+
+    def store_report_schedule(self, schedule: dict[str, Any]) -> None:
+        payload = self.read()
+        payload["report_schedule"] = schedule
+        payload["updated_at"] = datetime.now(UTC).isoformat()
+        write_json_file(self._path, payload)
+
+    def report_schedule(self) -> dict[str, Any]:
+        schedule = self.read().get("report_schedule")
+        return schedule if isinstance(schedule, dict) else {}
+
     def latest_report(self) -> dict[str, Any]:
         reports = self.read().get("reports")
         if isinstance(reports, list) and reports and isinstance(reports[-1], dict):

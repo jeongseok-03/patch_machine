@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
 
 import {
-  fetchLatestCompanyReport,
+  fetchCompanyReportStatus,
+  fetchWorkSchedule,
   generateCompanyReport,
+  saveReportSchedule,
   type ApiStatus,
   type AuthUser,
   type CompanyReport,
   type OperationsMemory,
+  type ReportInterval,
+  type WorkScheduleItem,
 } from '../api';
 import Button from './common/Button';
 import FormActions from './common/FormActions';
@@ -39,14 +43,45 @@ export default function HomePage({
   const permissions = user.permissions || [];
   const isAdmin = permissions.includes('*') || permissions.includes('admin:users');
   const [report, setReport] = useState<CompanyReport | null>(null);
+  const [interval, setIntervalValue] = useState<ReportInterval>('off');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [myItems, setMyItems] = useState<WorkScheduleItem[]>([]);
 
   useEffect(() => {
-    fetchLatestCompanyReport()
-      .then((latest) => setReport(latest && Object.keys(latest).length ? latest : null))
+    if (!isAdmin) {
+      fetchWorkSchedule()
+        .then((payload) =>
+          setMyItems(
+            payload.items.filter(
+              (item) => item.owner_id === user.id || item.owner_name === user.display_name,
+            ),
+          ),
+        )
+        .catch(() => setMyItems([]));
+      return;
+    }
+    fetchCompanyReportStatus()
+      .then((status) => {
+        const latest = status.report && Object.keys(status.report).length ? status.report : null;
+        setReport(latest);
+        setIntervalValue(status.schedule?.interval || 'off');
+        if (status.is_due) {
+          void refreshReport();
+        }
+      })
       .catch(() => setReport(null));
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin]);
+
+  async function changeInterval(next: ReportInterval) {
+    setIntervalValue(next);
+    try {
+      await saveReportSchedule(next);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : '주기 저장 실패');
+    }
+  }
 
   async function refreshReport() {
     setBusy(true);
@@ -70,10 +105,28 @@ export default function HomePage({
           <h1>{user.display_name}님, 안녕하세요</h1>
           <p className="lede">오늘 할 일을 확인하고, 궁금한 회사 맥락은 AI에게 바로 물어보세요.</p>
           <FormActions>
-            <Button onClick={() => onAction('work')}>내 업무 보기</Button>
+            <Button onClick={() => onAction('work')}>업무 현황 열기</Button>
             <Button variant="secondary" onClick={() => onAction('chat')}>AI에게 물어보기</Button>
           </FormActions>
         </div>
+        <article className="panel report-card">
+          <h3>내 업무</h3>
+          {myItems.length ? (
+            <ul>
+              {myItems.map((item) => (
+                <li key={item.id}>
+                  <strong>{item.title}</strong>
+                  {' — '}
+                  {item.status || '상태 없음'}
+                  {item.due_date ? ` · 마감 ${item.due_date}` : ''}
+                  {item.priority ? ` · 우선순위 ${item.priority}` : ''}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">아직 배정된 업무가 없습니다. 관리자가 업무를 배정하면 여기에 표시됩니다.</p>
+          )}
+        </article>
       </section>
     );
   }
@@ -91,6 +144,15 @@ export default function HomePage({
           <Button disabled={busy} onClick={() => void refreshReport()}>
             {busy ? 'AI가 문서를 읽는 중... (1~3분)' : '지금 리포트 만들기'}
           </Button>
+          <label className="checkbox-inline">
+            자동 갱신
+            <select value={interval} onChange={(e) => void changeInterval(e.target.value as ReportInterval)}>
+              <option value="off">끄기</option>
+              <option value="monthly">매월</option>
+              <option value="quarterly">분기마다</option>
+              <option value="semiannual">반기마다</option>
+            </select>
+          </label>
           {createdAt ? <span className="muted">마지막 리포트: {createdAt}</span> : null}
         </FormActions>
         {notice ? <p className="alert">{notice}</p> : null}

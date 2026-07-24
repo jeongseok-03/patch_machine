@@ -86,16 +86,88 @@ class ChatStore:
         append_jsonl_line(self._message_path(channel_id), record)
         return record
 
+    def _folded_messages(self, channel_id: str) -> list[dict[str, Any]]:
+        """Fold reaction/delete events into the append-only message stream."""
+
+        messages: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+        for record in iter_jsonl_records(self._message_path(channel_id)):
+            kind = record.get("type") or "message"
+            if kind == "message" and record.get("id"):
+                message = {**record, "reactions": {}}
+                messages[str(record["id"])] = message
+                order.append(str(record["id"]))
+            elif kind == "reaction":
+                target = messages.get(str(record.get("target_id")))
+                if target is None:
+                    continue
+                emoji = str(record.get("emoji") or "")
+                users = set(target["reactions"].get(emoji, []))
+                author = str(record.get("author_id") or "")
+                if author in users:
+                    users.discard(author)
+                else:
+                    users.add(author)
+                if users:
+                    target["reactions"][emoji] = sorted(users)
+                else:
+                    target["reactions"].pop(emoji, None)
+            elif kind == "delete":
+                messages.pop(str(record.get("target_id")), None)
+        return [messages[mid] for mid in order if mid in messages]
+
     def list_messages(
         self, channel_id: str, *, limit: int = 100, after_id: str = ""
     ) -> list[dict[str, Any]]:
-        records = list(iter_jsonl_records(self._message_path(channel_id)))
+        records = self._folded_messages(channel_id)
         if after_id:
             for index, record in enumerate(records):
                 if record.get("id") == after_id:
                     records = records[index + 1 :]
                     break
         return records[-limit:]
+
+    def toggle_reaction(
+        self, channel_id: str, message_id: str, *, author_id: str, emoji: str
+    ) -> None:
+        append_jsonl_line(
+            self._message_path(channel_id),
+            {
+                "type": "reaction",
+                "target_id": message_id,
+                "author_id": author_id,
+                "emoji": emoji,
+                "created_at": datetime.now(UTC).isoformat(),
+            },
+        )
+
+    def delete_message(self, channel_id: str, message_id: str, *, author_id: str) -> bool:
+        records = self._folded_messages(channel_id)
+        target = next((r for r in records if r.get("id") == message_id), None)
+        if target is None or target.get("author_id") != author_id:
+            return False
+        append_jsonl_line(
+            self._message_path(channel_id),
+            {
+                "type": "delete",
+                "target_id": message_id,
+                "author_id": author_id,
+                "created_at": datetime.now(UTC).isoformat(),
+            },
+        )
+        return True
+
+    def channel_activity(self) -> dict[str, dict[str, Any]]:
+        """Per-channel last message time + count (for unread badges)."""
+
+        activity: dict[str, dict[str, Any]] = {}
+        for channel in self.list_channels():
+            records = self._folded_messages(str(channel["id"]))
+            activity[str(channel["id"])] = {
+                "message_count": len(records),
+                "last_message_at": str(records[-1].get("created_at")) if records else "",
+            }
+        return activity
 
     def search_messages(self, query: str, *, limit: int = 8) -> list[dict[str, Any]]:
         tokens = [token.lower() for token in query.split() if len(token) >= 2]
@@ -104,7 +176,7 @@ class ChatStore:
         names = {channel["id"]: channel.get("name", "") for channel in self.list_channels()}
         scored: list[tuple[int, dict[str, Any]]] = []
         for channel_id, channel_name in names.items():
-            for record in iter_jsonl_records(self._message_path(channel_id)):
+            for record in self._folded_messages(channel_id):
                 text = str(record.get("text") or "").lower()
                 score = sum(text.count(token) for token in tokens)
                 if score:

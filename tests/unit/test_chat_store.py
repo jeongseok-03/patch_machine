@@ -45,3 +45,34 @@ def test_search_messages_across_channels(tmp_path: Path) -> None:
     hits = store.search_messages("한마트 단가")
     assert len(hits) == 1
     assert hits[0]["channel_name"] == channels[0]["name"]
+
+
+def test_reactions_toggle_and_fold(tmp_path: Path) -> None:
+    store = ChatStore(tmp_path)
+    channel = store.list_channels()[0]
+    message = store.append_message(channel["id"], author_id="a", author_name="A", text="배포 완료")
+    store.toggle_reaction(channel["id"], message["id"], author_id="b", emoji="👍")
+    store.toggle_reaction(channel["id"], message["id"], author_id="c", emoji="👍")
+    folded = store.list_messages(channel["id"])[0]
+    assert folded["reactions"]["👍"] == ["b", "c"]
+    store.toggle_reaction(channel["id"], message["id"], author_id="b", emoji="👍")
+    folded = store.list_messages(channel["id"])[0]
+    assert folded["reactions"]["👍"] == ["c"]
+
+
+def test_delete_message_only_by_author(tmp_path: Path) -> None:
+    store = ChatStore(tmp_path)
+    channel = store.list_channels()[0]
+    message = store.append_message(channel["id"], author_id="a", author_name="A", text="실수")
+    assert store.delete_message(channel["id"], message["id"], author_id="b") is False
+    assert store.delete_message(channel["id"], message["id"], author_id="a") is True
+    assert store.list_messages(channel["id"]) == []
+
+
+def test_channel_activity_counts(tmp_path: Path) -> None:
+    store = ChatStore(tmp_path)
+    channel = store.list_channels()[0]
+    store.append_message(channel["id"], author_id="a", author_name="A", text="hi")
+    activity = store.channel_activity()
+    assert activity[channel["id"]]["message_count"] == 1
+    assert activity[channel["id"]]["last_message_at"]

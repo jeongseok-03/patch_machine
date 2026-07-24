@@ -37,6 +37,8 @@ export type ChatChannel = {
   description: string;
   created_by: string;
   created_at: string;
+  last_message_at?: string;
+  message_count?: number;
 };
 
 export type ChatMessage = {
@@ -46,6 +48,8 @@ export type ChatMessage = {
   author_name: string;
   text: string;
   created_at: string;
+  reactions?: Record<string, string[]>;
+  pending?: boolean;
 };
 
 export function fetchChannels(): Promise<{ items: ChatChannel[] }> {
@@ -142,5 +146,18 @@ export function sendMailMessage(payload: { to: string; subject: string; body: st
   return requestJson<{ ok: boolean }>('/api/workspace/mail/send', {
     method: 'POST',
     body: JSON.stringify(payload),
+  });
+}
+
+export function reactToMessage(channelId: string, messageId: string, emoji: string): Promise<{ ok: boolean }> {
+  return requestJson<{ ok: boolean }>(`/api/workspace/channels/${channelId}/messages/${messageId}/react`, {
+    method: 'POST',
+    body: JSON.stringify({ emoji }),
+  });
+}
+
+export function deleteChatMessage(channelId: string, messageId: string): Promise<{ ok: boolean }> {
+  return requestJson<{ ok: boolean }>(`/api/workspace/channels/${channelId}/messages/${messageId}`, {
+    method: 'DELETE',
   });
 }

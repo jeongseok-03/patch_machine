@@ -75,7 +75,13 @@ def create_workspace_router(container: Container) -> APIRouter:
         x_ng_user: str | None = Header(default=None, alias="X-NG-User"),
     ) -> dict[str, object]:
         _require(container, x_ng_user, "work:read")
-        return {"items": container.chat.list_channels()}
+        activity = container.chat.channel_activity()
+        return {
+            "items": [
+                {**channel, **activity.get(str(channel.get("id")), {})}
+                for channel in container.chat.list_channels()
+            ]
+        }
 
     @router.post("/workspace/channels")
     async def create_channel(
@@ -123,6 +129,33 @@ def create_workspace_router(container: Container) -> APIRouter:
             channel_id, author_id=actor, author_name=actor, text=text
         )
         return {"ok": True, "item": record}
+
+    @router.post("/workspace/channels/{channel_id}/messages/{message_id}/react")
+    async def react_message(
+        channel_id: str,
+        message_id: str,
+        payload: dict[str, str],
+        x_ng_user: str | None = Header(default=None, alias="X-NG-User"),
+    ) -> dict[str, object]:
+        actor = _require(container, x_ng_user, "work:read")
+        emoji = str(payload.get("emoji") or "").strip()
+        if not emoji or len(emoji) > 8:
+            raise HTTPException(status_code=400, detail="이모지가 필요합니다.")
+        if not container.chat.channel_exists(channel_id):
+            raise HTTPException(status_code=404, detail="채널을 찾을 수 없습니다.")
+        container.chat.toggle_reaction(channel_id, message_id, author_id=actor, emoji=emoji)
+        return {"ok": True}
+
+    @router.delete("/workspace/channels/{channel_id}/messages/{message_id}")
+    async def delete_message(
+        channel_id: str,
+        message_id: str,
+        x_ng_user: str | None = Header(default=None, alias="X-NG-User"),
+    ) -> dict[str, object]:
+        actor = _require(container, x_ng_user, "work:read")
+        if not container.chat.delete_message(channel_id, message_id, author_id=actor):
+            raise HTTPException(status_code=403, detail="본인 메시지만 삭제할 수 있습니다.")
+        return {"ok": True}
 
     @router.post("/workspace/channels/{channel_id}/summary")
     async def summarize_channel(

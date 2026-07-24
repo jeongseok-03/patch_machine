@@ -202,3 +202,85 @@ async def analyze_company_documents(
             f"문서 묶음 {result.failed_batches}개는 이번에 해석하지 못해 건너뛰었습니다."
         )
     return result
+
+
+REPORT_MAX_TOKENS = 8000
+
+
+def _report_prompt(
+    profile: dict[str, Any], summaries: dict[str, str], changed_paths: list[str]
+) -> str:
+    lines = "\n".join(f"- {path}: {summary}" for path, summary in summaries.items())
+    changed = "\n".join(f"- {path}" for path in changed_paths) or "(이번에 바뀐 문서 없음)"
+    organization = str(profile.get("organization") or "")
+    return (
+        "당신은 이 회사의 경영 보좌 AI입니다. 아래 문서 요약을 근거로 CEO가 읽을 현황 리포트를 만드세요.\n"
+        f"회사 소개: {organization}\n\n"
+        "JSON 객체로만 답하세요. 각 항목은 짧은 한국어 문장 배열이며, 근거 문서가 있는 내용만 씁니다.\n"
+        "{\n"
+        '  "progressed": ["진행되거나 완료된 일"],\n'
+        '  "attention": ["문제, 지연, 재고 부족, 품질 이슈 등 신경 쓸 일"],\n'
+        '  "quiet": ["이전 문서에는 있었는데 최근 소식이 없는 일"],\n'
+        '  "people": ["부서별 인력 상황, 채용이 필요해 보이는 신호"],\n'
+        '  "money": ["비용, 단가, 매출, 자금 관련 언급"]\n'
+        "}\n\n"
+        f"이번에 새로 생기거나 바뀐 문서:\n{changed}\n\n"
+        f"전체 문서 요약:\n{lines}"
+    )
+
+
+async def generate_company_report(
+    files: list[ParsedSetupFile],
+    *,
+    store: CompanyKnowledgeStore,
+    complete: CompleteFn,
+    batch_size: int = BATCH_SIZE,
+    max_batches: int = MAX_BATCHES_PER_RUN,
+) -> dict[str, Any] | None:
+    """Build a CEO status report from cached + freshly changed summaries."""
+
+    summaries: dict[str, str] = {}
+    changed: list[str] = []
+    pending: list[ParsedSetupFile] = []
+    for item in files:
+        mtime, size = _fingerprint(item)
+        cached = store.cached_summary(item.path, mtime=mtime, size=size)
+        if cached:
+            summaries[item.path] = cached
+        else:
+            pending.append(item)
+
+    batches = [pending[i : i + batch_size] for i in range(0, len(pending), batch_size)]
+    for batch in batches[:max_batches]:
+        raw = await complete(_batch_prompt(batch), BATCH_MAX_TOKENS)
+        parsed = _parse_json_object(raw)
+        if parsed is None:
+            continue
+        entries: dict[str, dict[str, Any]] = {}
+        for item in batch:
+            summary = _summary_for(parsed, item)
+            if not summary:
+                continue
+            mtime, size = _fingerprint(item)
+            summaries[item.path] = summary
+            changed.append(item.path)
+            entries[item.path] = {"mtime": mtime, "size": size, "summary": summary}
+        if entries:
+            store.store_summaries(entries)
+
+    if not summaries:
+        return None
+    raw = await complete(
+        _report_prompt(store.company_profile(), summaries, changed), REPORT_MAX_TOKENS
+    )
+    parsed_report = _parse_json_object(raw)
+    if parsed_report is None:
+        return None
+    report: dict[str, Any] = {
+        key: [str(item) for item in value] if isinstance(value, list) else []
+        for key, value in parsed_report.items()
+        if key in {"progressed", "attention", "quiet", "people", "money"}
+    }
+    report["read_files"] = len(summaries)
+    report["changed_files"] = len(changed)
+    return report

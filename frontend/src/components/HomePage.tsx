@@ -1,46 +1,108 @@
-import type { ApiStatus, OperationsMemory } from '../api';
+import { useEffect, useState } from 'react';
+
+import {
+  fetchLatestCompanyReport,
+  generateCompanyReport,
+  type ApiStatus,
+  type CompanyReport,
+  type OperationsMemory,
+} from '../api';
+import Button from './common/Button';
+import FormActions from './common/FormActions';
+
+const SECTIONS: Array<[keyof CompanyReport, string, string]> = [
+  ['progressed', '✅ 진행된 일', '문서에서 확인된 진척 사항이 여기 표시됩니다.'],
+  ['attention', '⚠ 신경 쓸 일', '문제, 지연, 재고·품질 이슈가 여기 표시됩니다.'],
+  ['quiet', '⏸ 소식이 없는 일', '언급이 끊긴 업무가 여기 표시됩니다.'],
+  ['people', '👥 인력 신호', '부서별 인력 상황과 채용 신호가 여기 표시됩니다.'],
+  ['money', '💰 돈 관련 언급', '비용, 단가, 매출, 자금 관련 내용이 여기 표시됩니다.'],
+];
 
 export default function HomePage({
   memory,
-  status,
-  onAction,
 }: {
   memory: OperationsMemory;
   status: ApiStatus | null;
   onAction: (page: string) => void;
 }) {
-  const queue = status ? `${status.queue_size}/${status.queue_capacity}` : '-';
-  const memoryState = status?.operations_memory_configured ? '설정 완료' : '초기 상태';
+  const [report, setReport] = useState<CompanyReport | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    fetchLatestCompanyReport()
+      .then((latest) => setReport(latest && Object.keys(latest).length ? latest : null))
+      .catch(() => setReport(null));
+  }, []);
+
+  async function refreshReport() {
+    setBusy(true);
+    setNotice('');
+    try {
+      setReport(await generateCompanyReport());
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : '리포트 생성 실패');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const createdAt = report?.created_at ? new Date(report.created_at).toLocaleString() : '';
+
   return (
     <section>
       <div className="hero-panel">
-        <p className="eyebrow">AI Office BPA Console</p>
-        <h1>회사 업무·문서·채용·인수인계를 AI로 굴리는 사내 콘솔</h1>
+        <p className="eyebrow">{memory.company_name || '우리 회사'}</p>
+        <h1>지금 우리 회사, 어떻게 돌아가고 있나</h1>
         <p className="lede">
-          사내 메모리 엔진과 LLM 에이전트가 오피스워크를 자동화합니다. 경영진은 병목을 한눈에 보고,
-          직원은 업무 맥락을 AI에게 그대로 물어볼 수 있습니다.
+          {memory.organization ||
+            'AI가 회사 폴더의 문서를 읽고 진행상황을 정리합니다. 아래에서 최신 리포트를 확인하세요.'}
         </p>
+        <FormActions>
+          <Button disabled={busy} onClick={() => void refreshReport()}>
+            {busy ? 'AI가 문서를 읽는 중... (1~3분)' : '지금 리포트 만들기'}
+          </Button>
+          {createdAt ? <span className="muted">마지막 리포트: {createdAt}</span> : null}
+        </FormActions>
+        {notice ? <p className="alert">{notice}</p> : null}
       </div>
-      <section className="guide-grid">
-        <article className="guide-card">
-          <p className="eyebrow">네고티움 영구메모리</p>
-          <h3>{memory.company_name || '회사 미설정'}</h3>
-          <p>{memory.office_project || '오피스 프로젝트와 진행 계획을 등록하면 모든 LLM 응답에 반영됩니다.'}</p>
-          <button type="button" onClick={() => onAction('dashboard')}>운영 메모리 설정</button>
+
+      {!report ? (
+        <article className="panel report-empty">
+          <h3>아직 리포트가 없습니다</h3>
+          <p className="muted">
+            [지금 리포트 만들기]를 누르면 AI가 회사 폴더의 문서를 읽고 진행된 일 / 신경 쓸 일 /
+            인력·자금 신호를 정리해 줍니다. 이후에는 바뀐 문서만 다시 읽어서 빠르게 갱신됩니다.
+          </p>
         </article>
-        <article className="guide-card">
-          <p className="eyebrow">시스템 상태</p>
-          <h3>큐 {queue} · 메모리 {memoryState}</h3>
-          <p>최근 업무 로그와 병목 요약을 업무 현황 페이지에서 확인할 수 있습니다.</p>
-          <button type="button" onClick={() => onAction('work')}>업무 현황 보기</button>
-        </article>
-        <article className="guide-card">
-          <p className="eyebrow">관리</p>
-          <h3>API 키 · 권한 · 업로드</h3>
-          <p>API 키 암호화 보관, 직급/권한, 문서 업로드를 관리자 페이지에서 처리합니다.</p>
-          <button type="button" onClick={() => onAction('admin')}>관리 페이지 열기</button>
-        </article>
-      </section>
+      ) : (
+        <div className="report-grid">
+          {SECTIONS.map(([key, title, description]) => {
+            const items = (report[key] as string[] | undefined) || [];
+            return (
+              <article className="panel report-card" key={String(key)}>
+                <h3>{title}</h3>
+                {items.length ? (
+                  <ul>
+                    {items.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted">{description} 이번 리포트에서는 발견된 내용이 없습니다.</p>
+                )}
+              </article>
+            );
+          })}
+          <article className="panel report-card">
+            <h3>근거</h3>
+            <p className="muted">
+              문서 {report.read_files ?? 0}개를 근거로 작성했고, 그중 {report.changed_files ?? 0}개가
+              지난 리포트 이후 새로 생기거나 바뀐 문서입니다.
+            </p>
+          </article>
+        </div>
+      )}
     </section>
   );
 }

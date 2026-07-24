@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Header, HTTPException
 
@@ -18,7 +19,7 @@ from negotium.app.api._shared import (
     _selected_upload_records,
     _start_ai_job,
 )
-from negotium.app.company_analysis import analyze_company_documents
+from negotium.app.company_analysis import analyze_company_documents, generate_company_report
 from negotium.app.company_scan import (
     ScanConfig,
     ScanReport,
@@ -94,6 +95,13 @@ def create_setup_router(container: Container) -> APIRouter:
                 *parse_scanned_files(scan_report, max_files=320, max_total_chars=800_000),
             ]
             force_local = not payload.scan.allow_cloud
+            container.company_knowledge.store_scan_config(
+                {
+                    "root_paths": payload.scan.root_paths,
+                    "excluded_paths": payload.scan.excluded_paths,
+                    "allow_cloud": payload.scan.allow_cloud,
+                }
+            )
         job = _start_ai_job(
             container,
             task="initial_office_setup.analyze",
@@ -207,6 +215,59 @@ def create_setup_router(container: Container) -> APIRouter:
             "ok": True,
             "access_control": {**container.access_control.read(), "permissions": ALL_PERMISSIONS},
         }
+
+    @router.post("/setup/office/report/generate")
+    async def generate_office_report(
+        x_ng_user: str | None = Header(default=None, alias="X-NG-User"),
+    ) -> dict[str, object]:
+        actor = _require(container, x_ng_user, "admin:users")
+        config = container.company_knowledge.scan_config()
+        if not config.get("root_paths"):
+            raise HTTPException(
+                status_code=400,
+                detail="스캔 설정이 없습니다. 초기 세팅에서 회사 폴더를 먼저 지정해 주세요.",
+            )
+        scan = OfficeScanRequest.model_validate(config)
+        report_scan = _run_company_scan(scan)
+        parsed_files = parse_scanned_files(report_scan, max_files=320, max_total_chars=800_000)
+        force_local = not scan.allow_cloud
+
+        async def _complete(prompt: str, max_tokens: int) -> str:
+            return await _complete_office_task(
+                container,
+                prompt,
+                task="memory_summary",
+                force_local=force_local,
+                max_tokens=max_tokens,
+            )
+
+        report = await generate_company_report(
+            parsed_files, store=container.company_knowledge, complete=_complete
+        )
+        if report is None:
+            raise HTTPException(
+                status_code=502, detail="리포트 생성에 실패했습니다. 잠시 후 다시 시도해 주세요."
+            )
+        report["created_at"] = datetime.now(UTC).isoformat()
+        container.company_knowledge.store_report(report)
+        _audit(
+            container,
+            actor=actor,
+            action="setup.office.report",
+            target="company_report",
+            details={
+                "read_files": report.get("read_files"),
+                "changed_files": report.get("changed_files"),
+            },
+        )
+        return report
+
+    @router.get("/setup/office/report/latest")
+    async def latest_office_report(
+        x_ng_user: str | None = Header(default=None, alias="X-NG-User"),
+    ) -> dict[str, object]:
+        _require(container, x_ng_user, "admin:users")
+        return container.company_knowledge.latest_report()
 
     return router
 

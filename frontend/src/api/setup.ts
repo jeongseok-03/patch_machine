@@ -15,6 +15,25 @@ export function browseOfficeFolders(path: string): Promise<OfficeBrowseResult> {
   });
 }
 
+export type CompanyReport = {
+  progressed?: string[];
+  attention?: string[];
+  quiet?: string[];
+  people?: string[];
+  money?: string[];
+  read_files?: number;
+  changed_files?: number;
+  created_at?: string;
+};
+
+export function generateCompanyReport(): Promise<CompanyReport> {
+  return requestJson<CompanyReport>('/api/setup/office/report/generate', { method: 'POST' });
+}
+
+export function fetchLatestCompanyReport(): Promise<CompanyReport> {
+  return requestJson<CompanyReport>('/api/setup/office/report/latest');
+}
+
 export function previewOfficeScan(payload: OfficeScanRequest): Promise<OfficeScanReport> {
   return requestJson<OfficeScanReport>('/api/setup/office/scan-preview', {
     method: 'POST',

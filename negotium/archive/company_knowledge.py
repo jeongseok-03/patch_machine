@@ -62,3 +62,29 @@ class CompanyKnowledgeStore:
     def company_profile(self) -> dict[str, Any]:
         profile = self.read().get("company_profile")
         return profile if isinstance(profile, dict) else {}
+
+    def store_scan_config(self, config: dict[str, Any]) -> None:
+        payload = self.read()
+        payload["scan_config"] = config
+        payload["updated_at"] = datetime.now(UTC).isoformat()
+        write_json_file(self._path, payload)
+
+    def scan_config(self) -> dict[str, Any]:
+        config = self.read().get("scan_config")
+        return config if isinstance(config, dict) else {}
+
+    def store_report(self, report: dict[str, Any]) -> None:
+        payload = self.read()
+        reports = payload.get("reports")
+        if not isinstance(reports, list):
+            reports = []
+        reports.append(report)
+        payload["reports"] = reports[-24:]
+        payload["updated_at"] = datetime.now(UTC).isoformat()
+        write_json_file(self._path, payload)
+
+    def latest_report(self) -> dict[str, Any]:
+        reports = self.read().get("reports")
+        if isinstance(reports, list) and reports and isinstance(reports[-1], dict):
+            return reports[-1]
+        return {}

@@ -18,6 +18,7 @@ this module stays independent of provider wiring and is trivially testable.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -311,3 +312,129 @@ async def generate_company_report(
     report["read_files"] = len(summaries)
     report["changed_files"] = len(changed)
     return report
+
+
+ANSWER_MAX_TOKENS = 8000
+DRAFT_MAX_TOKENS = 9000
+
+ReadFileFn = Callable[[str], "ParsedSetupFile | None"]
+
+
+def rank_files_by_query(summaries: dict[str, str], query: str, *, top: int = 6) -> list[str]:
+    """Score cached summaries by token overlap with the query."""
+
+    tokens = [t.lower() for t in re.split(r"[\s,./()\[\]{}:;'\"!?~·-]+", query) if len(t) >= 2]
+    if not tokens:
+        return []
+    scored: list[tuple[int, str]] = []
+    for path, summary in summaries.items():
+        haystack = f"{Path(path).name} {summary}".lower()
+        score = sum(haystack.count(token) for token in tokens)
+        if score:
+            scored.append((score, path))
+    scored.sort(key=lambda pair: (-pair[0], pair[1]))
+    return [path for _, path in scored[:top]]
+
+
+def _doc_blocks(files: list[ParsedSetupFile], *, per_file_chars: int = 3000) -> str:
+    return "\n\n".join(f"### {item.path}\n{item.text[:per_file_chars]}" for item in files)
+
+
+async def answer_company_question(
+    question: str,
+    *,
+    store: CompanyKnowledgeStore,
+    complete: CompleteFn,
+    read_file: ReadFileFn,
+) -> dict[str, Any] | None:
+    """Answer a question from company documents, citing sources."""
+
+    summaries = {
+        path: str(entry.get("summary") or "") for path, entry in store.file_summaries().items()
+    }
+    ranked = rank_files_by_query(summaries, question)
+    if not ranked:
+        ranked = list(summaries.keys())[:4]
+    files = [item for item in (read_file(path) for path in ranked) if item is not None]
+    if not files:
+        return None
+    profile = store.company_profile()
+    prompt = (
+        "당신은 이 회사의 문서를 모두 알고 있는 사내 AI입니다.\n"
+        f"회사 소개: {profile.get('organization', '')}\n\n"
+        "아래 문서 내용만 근거로 질문에 답하세요. 문서에 없는 내용은 지어내지 말고 "
+        '"문서에서 찾지 못했습니다"라고 답하세요.\n'
+        'JSON 객체로만 답하세요: {"answer": "한국어 답변 (짧고 구체적으로)", "sources": ["실제 근거로 쓴 문서 경로"]}\n\n'
+        f"질문: {question}\n\n"
+        f"문서:\n{_doc_blocks(files)}"
+    )
+    parsed = _parse_json_object(await complete(prompt, ANSWER_MAX_TOKENS))
+    if parsed is None or not parsed.get("answer"):
+        return None
+    sources = parsed.get("sources")
+    return {
+        "answer": str(parsed["answer"]),
+        "sources": [str(s) for s in sources] if isinstance(sources, list) else [],
+    }
+
+
+async def draft_weekly_report(
+    *,
+    author: str,
+    recent_files: list[ParsedSetupFile],
+    store: CompanyKnowledgeStore,
+    complete: CompleteFn,
+) -> str | None:
+    """Draft a weekly report from documents changed in the last week."""
+
+    if not recent_files:
+        return None
+    profile = store.company_profile()
+    prompt = (
+        "당신은 사내 보고서 작성 AI입니다. 아래는 최근 7일 사이에 새로 만들어지거나 수정된 회사 문서입니다.\n"
+        f"회사 소개: {profile.get('organization', '')}\n"
+        f"작성자: {author}\n\n"
+        "이 문서들을 근거로 주간보고 초안을 마크다운으로 작성하세요. 형식:\n"
+        "# 주간보고 (작성자 이름)\n"
+        "## 이번 주 진행한 일 (문서 근거가 있는 것만, 항목 끝에 근거 문서명 괄호 표기)\n"
+        "## 이슈/특이사항\n"
+        "## 다음 주 계획 (문서에서 예정된 일이 보이면 채우고, 없으면 '직접 채워주세요')\n"
+        "문서에 없는 내용은 지어내지 마세요. 마크다운 본문만 출력하세요.\n\n"
+        f"문서:\n{_doc_blocks(recent_files)}"
+    )
+    text = (await complete(prompt, DRAFT_MAX_TOKENS)).strip()
+    return text or None
+
+
+async def draft_handover(
+    *,
+    person: str,
+    store: CompanyKnowledgeStore,
+    complete: CompleteFn,
+    read_file: ReadFileFn,
+) -> str | None:
+    """Draft a handover document for a departing person from folder knowledge."""
+
+    summaries = {
+        path: str(entry.get("summary") or "") for path, entry in store.file_summaries().items()
+    }
+    ranked = rank_files_by_query(summaries, person, top=8)
+    if not ranked:
+        ranked = list(summaries.keys())[:8]
+    files = [item for item in (read_file(path) for path in ranked) if item is not None]
+    if not files:
+        return None
+    profile = store.company_profile()
+    prompt = (
+        "당신은 사내 인수인계 문서 작성 AI입니다.\n"
+        f"회사 소개: {profile.get('organization', '')}\n"
+        f"인수인계 대상자: {person}\n\n"
+        "아래 문서에서 이 사람과 관련된 업무를 찾아 인수인계 초안을 마크다운으로 작성하세요. 형식:\n"
+        f"# {person} 인수인계 문서 (초안)\n"
+        "## 담당 업무 요약\n## 진행 중인 일과 현재 상태\n## 관련 거래처/담당자\n"
+        "## 주의사항·놓치기 쉬운 것\n## 관련 문서 위치 (경로 목록)\n"
+        "문서에 근거가 없는 내용은 쓰지 말고, 관련 정보가 부족한 절에는 '문서에서 확인되지 않음 — 당사자 확인 필요'라고 적으세요.\n\n"
+        f"문서:\n{_doc_blocks(files)}"
+    )
+    text = (await complete(prompt, DRAFT_MAX_TOKENS)).strip()
+    return text or None

@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactElement } from 'react';
 
 import {
   createWorkScheduleItem,
+  generateHandoverDraft,
+  generateWeeklyDraft,
   fetchCompanyReportStatus,
   fetchOrgRoster,
   fetchWorkSchedule,
@@ -115,6 +117,9 @@ export default function HomePage({
   const [employeeCount, setEmployeeCount] = useState<number | null>(null);
   const [docPreview, setDocPreview] = useState<{ filename: string; text: string } | null>(null);
   const [resolved, setResolved] = useState<Set<string>>(new Set());
+  const [draftText, setDraftText] = useState<{ title: string; markdown: string } | null>(null);
+  const [draftBusy, setDraftBusy] = useState(false);
+  const [handoverName, setHandoverName] = useState('');
 
   function showToast(message: string) {
     setToast(message);
@@ -209,6 +214,57 @@ export default function HomePage({
     }
   }
 
+  async function makeWeeklyDraft() {
+    setDraftBusy(true);
+    try {
+      const result = await generateWeeklyDraft();
+      setDraftText({ title: '주간보고 초안', markdown: result.markdown });
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : '주간보고 초안 생성 실패');
+    } finally {
+      setDraftBusy(false);
+    }
+  }
+
+  async function makeHandoverDraft() {
+    if (!handoverName.trim()) {
+      showToast('인수인계 대상자 이름을 입력하세요.');
+      return;
+    }
+    setDraftBusy(true);
+    try {
+      const result = await generateHandoverDraft(handoverName.trim());
+      setDraftText({ title: `${handoverName.trim()} 인수인계 초안`, markdown: result.markdown });
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : '인수인계 초안 생성 실패');
+    } finally {
+      setDraftBusy(false);
+    }
+  }
+
+  const draftModal = draftText ? (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => setDraftText(null)}>
+      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="folder-browser-head">
+          <strong>{draftText.title}</strong>
+          <span className="report-item-actions">
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard.writeText(draftText.markdown);
+                showToast('복사했습니다.');
+              }}
+            >
+              복사
+            </button>
+            <button type="button" onClick={() => setDraftText(null)}>닫기</button>
+          </span>
+        </div>
+        <pre className="doc-preview">{draftText.markdown}</pre>
+      </div>
+    </div>
+  ) : null;
+
   const myItems = workItems.filter(
     (item) => item.owner_id === user.id || item.owner_name === user.display_name,
   );
@@ -236,8 +292,11 @@ export default function HomePage({
           <h1>{user.display_name}님, 안녕하세요</h1>
           <p className="lede">오늘 할 일을 확인하고, 궁금한 회사 맥락은 AI에게 바로 물어보세요.</p>
           <FormActions>
-            <Button onClick={() => onAction('work')}>업무 현황 열기</Button>
-            <Button variant="secondary" onClick={() => onAction('assistant')}>AI에게 물어보기</Button>
+            <Button disabled={draftBusy} onClick={() => void makeWeeklyDraft()}>
+              {draftBusy ? '문서를 읽는 중...' : '주간보고 초안 만들기'}
+            </Button>
+            <Button variant="secondary" onClick={() => onAction('ask')}>회사에 물어보기</Button>
+            <Button variant="secondary" onClick={() => onAction('work')}>업무 현황</Button>
           </FormActions>
         </div>
         <article className="panel report-card">
@@ -258,6 +317,7 @@ export default function HomePage({
             <p className="muted">아직 배정된 업무가 없습니다. 관리자가 업무를 배정하면 여기에 표시됩니다.</p>
           )}
         </article>
+        {draftModal}
         {toast ? <div className="toast">{toast}</div> : null}
       </section>
     );
@@ -418,6 +478,29 @@ export default function HomePage({
             </FormActions>
           </article>
         ))}
+        <article className="panel report-card">
+          <h3>인수인계 초안</h3>
+          <p className="muted">퇴사·이동하는 직원의 이름을 넣으면 관련 문서를 찾아 인수인계 초안을 만듭니다.</p>
+          <div className="inline-input-row">
+            <input
+              value={handoverName}
+              placeholder="예: 김영순"
+              onChange={(e) => setHandoverName(e.target.value)}
+            />
+            <Button variant="secondary" disabled={draftBusy} onClick={() => void makeHandoverDraft()}>
+              {draftBusy ? '작성 중...' : '만들기'}
+            </Button>
+          </div>
+        </article>
+        <article className="panel report-card">
+          <h3>주간보고 초안</h3>
+          <p className="muted">최근 7일 사이 바뀐 문서로 주간보고 초안을 만듭니다. 직원 홈에도 같은 버튼이 있습니다.</p>
+          <FormActions>
+            <Button variant="secondary" disabled={draftBusy} onClick={() => void makeWeeklyDraft()}>
+              {draftBusy ? '작성 중...' : '만들기'}
+            </Button>
+          </FormActions>
+        </article>
       </div>
 
       {docPreview ? (
@@ -431,6 +514,7 @@ export default function HomePage({
           </div>
         </div>
       ) : null}
+      {draftModal}
       {toast ? <div className="toast">{toast}</div> : null}
     </section>
   );

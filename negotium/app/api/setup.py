@@ -19,7 +19,13 @@ from negotium.app.api._shared import (
     _selected_upload_records,
     _start_ai_job,
 )
-from negotium.app.company_analysis import analyze_company_documents, generate_company_report
+from negotium.app.company_analysis import (
+    analyze_company_documents,
+    answer_company_question,
+    draft_handover,
+    draft_weekly_report,
+    generate_company_report,
+)
 from negotium.app.company_scan import (
     ScanConfig,
     ScanReport,
@@ -322,6 +328,124 @@ def create_setup_router(container: Container) -> APIRouter:
             raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다.")
         parsed = parse_setup_file(file_path)
         return {"path": raw, "filename": parsed.filename, "text": parsed.text[:8000]}
+
+    def _scan_roots() -> list[str]:
+        config = container.company_knowledge.scan_config()
+        return [normalize_scan_path(str(r)) for r in config.get("root_paths") or []]
+
+    def _read_scanned(path_str: str) -> object:
+        from pathlib import Path as _Path
+
+        target = normalize_scan_path(path_str)
+        roots = _scan_roots()
+        if not any(target == root or target.startswith(root + "/") for root in roots if root):
+            return None
+        file_path = _Path(target)
+        if not file_path.is_file():
+            return None
+        try:
+            return parse_setup_file(file_path)
+        except (OSError, ValueError, RuntimeError):
+            return None
+
+    def _office_complete(force_local: bool):  # type: ignore[no-untyped-def]
+        async def _complete(prompt: str, max_tokens: int) -> str:
+            return await _complete_office_task(
+                container,
+                prompt,
+                task="memory_summary",
+                force_local=force_local,
+                max_tokens=max_tokens,
+            )
+
+        return _complete
+
+    def _cloud_allowed() -> bool:
+        return bool(container.company_knowledge.scan_config().get("allow_cloud"))
+
+    @router.post("/setup/office/ask")
+    async def ask_company(
+        payload: dict[str, str],
+        x_ng_user: str | None = Header(default=None, alias="X-NG-User"),
+    ) -> dict[str, object]:
+        _require(container, x_ng_user, "llm:chat")
+        question = str(payload.get("question") or "").strip()
+        if not question:
+            raise HTTPException(status_code=400, detail="질문을 입력해 주세요.")
+        result = await answer_company_question(
+            question,
+            store=container.company_knowledge,
+            complete=_office_complete(not _cloud_allowed()),
+            read_file=_read_scanned,  # type: ignore[arg-type]
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=502,
+                detail="답변을 만들지 못했습니다. 회사 폴더 분석이 먼저 필요할 수 있습니다.",
+            )
+        return result
+
+    @router.post("/setup/office/weekly-draft")
+    async def weekly_draft(
+        x_ng_user: str | None = Header(default=None, alias="X-NG-User"),
+    ) -> dict[str, object]:
+        actor = _require(container, x_ng_user, "llm:chat")
+        config = container.company_knowledge.scan_config()
+        if not config.get("root_paths"):
+            raise HTTPException(status_code=400, detail="회사 폴더가 아직 설정되지 않았습니다.")
+        scan = OfficeScanRequest.model_validate(config)
+        report_scan = _run_company_scan(scan)
+        from pathlib import Path as _Path
+
+        week_ago = datetime.now(UTC).timestamp() - 7 * 86400
+        recent = []
+        for item in report_scan.files:
+            if not item.included:
+                continue
+            try:
+                if _Path(item.path).stat().st_mtime >= week_ago:
+                    parsed = _read_scanned(item.path)
+                    if parsed is not None:
+                        recent.append(parsed)
+            except OSError:
+                continue
+        text = await draft_weekly_report(
+            author=actor,
+            recent_files=recent[:20],  # type: ignore[arg-type]
+            store=container.company_knowledge,
+            complete=_office_complete(not _cloud_allowed()),
+        )
+        if text is None:
+            raise HTTPException(
+                status_code=404, detail="최근 7일 사이에 바뀐 문서가 없어 초안을 만들 수 없습니다."
+            )
+        return {"markdown": text, "recent_files": len(recent)}
+
+    @router.post("/setup/office/handover-draft")
+    async def handover_draft(
+        payload: dict[str, str],
+        x_ng_user: str | None = Header(default=None, alias="X-NG-User"),
+    ) -> dict[str, object]:
+        actor = _require(container, x_ng_user, "admin:users")
+        person = str(payload.get("person") or "").strip()
+        if not person:
+            raise HTTPException(status_code=400, detail="인수인계 대상자 이름을 입력해 주세요.")
+        text = await draft_handover(
+            person=person,
+            store=container.company_knowledge,
+            complete=_office_complete(not _cloud_allowed()),
+            read_file=_read_scanned,  # type: ignore[arg-type]
+        )
+        if text is None:
+            raise HTTPException(status_code=502, detail="인수인계 초안을 만들지 못했습니다.")
+        _audit(
+            container,
+            actor=actor,
+            action="setup.office.handover_draft",
+            target="handover",
+            details={"person": person},
+        )
+        return {"markdown": text}
 
     @router.get("/setup/office/report/schedule")
     async def get_report_schedule(

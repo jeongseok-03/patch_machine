@@ -91,3 +91,25 @@ export function applyInitialOfficeSetup(payload: InitialOfficeSetupResult): Prom
     body: JSON.stringify(payload),
   });
 }
+
+export type CompanyAnswer = { answer: string; sources: string[] };
+
+export function askCompany(question: string): Promise<CompanyAnswer> {
+  return requestJson<CompanyAnswer>('/api/setup/office/ask', {
+    method: 'POST',
+    body: JSON.stringify({ question }),
+  });
+}
+
+export function generateWeeklyDraft(): Promise<{ markdown: string; recent_files: number }> {
+  return requestJson<{ markdown: string; recent_files: number }>('/api/setup/office/weekly-draft', {
+    method: 'POST',
+  });
+}
+
+export function generateHandoverDraft(person: string): Promise<{ markdown: string }> {
+  return requestJson<{ markdown: string }>('/api/setup/office/handover-draft', {
+    method: 'POST',
+    body: JSON.stringify({ person }),
+  });
+}

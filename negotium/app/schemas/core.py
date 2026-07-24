@@ -882,11 +882,21 @@ class PatchNoteRecommendationPayload(BaseModel):
     human_review_required: list[str] = Field(default_factory=list)
 
 
+class OfficeScanRequest(BaseModel):
+    """Filesystem auto-discovery scan: roots to read, paths to never touch."""
+
+    root_paths: list[str] = Field(default_factory=list)
+    excluded_paths: list[str] = Field(default_factory=list)
+    allow_cloud: bool = False
+    max_files: int = 400
+
+
 class InitialOfficeAnalyzeRequest(BaseModel):
     message: str = ""
     upload_ids: list[str] = Field(default_factory=list)
     intent: str = "initial_office_setup"
     company_profile: CompanyProfilePayload = Field(default_factory=CompanyProfilePayload)
+    scan: OfficeScanRequest | None = None
 
 
 class InitialOfficeSetupResult(BaseModel):
@@ -909,3 +919,4 @@ class InitialOfficeSetupResult(BaseModel):
     questions: list[str] = Field(default_factory=list)
     sensitive_hint: bool = False
     ai_job: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)

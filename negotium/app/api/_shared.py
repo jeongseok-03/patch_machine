@@ -1561,6 +1561,32 @@ def _hiring_workload_context(container: Container, payload: HiringRequest) -> st
     return "\n".join(lines)
 
 
+def _resolve_forced_local_task(container: Container, task: str) -> tuple[LlmProviderName, LlmRoute]:
+    """Pin a task to the local route regardless of configured task routes.
+
+    Company filesystem scans feed raw internal documents into the prompt, so a
+    misconfigured cloud route must fail loudly instead of silently uploading
+    company data to an external provider.
+    """
+
+    runtime = container.llm_runtime.read()
+    if not runtime.local_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "회사 폴더 스캔 분석은 로컬 LLM에서만 실행됩니다. 로컬 LLM을 활성화하거나, "
+                "클라우드 전송에 명시적으로 동의(allow_cloud)해 주세요."
+            ),
+        )
+    task_route = runtime.route_for(task)
+    if task_route.route == "local":
+        return task_route.provider, "local"
+    chat_route = runtime.route_for("chat")
+    if chat_route.route == "local":
+        return chat_route.provider, "local"
+    return "vllm", "local"
+
+
 def _resolve_runtime_task(container: Container, task: str) -> tuple[LlmProviderName, LlmRoute]:
     runtime = container.llm_runtime.read()
     task_route = runtime.route_for(task)
@@ -1648,8 +1674,12 @@ async def _complete_office_task(
     *,
     task: str = "document_generation",
     image_parts: list[dict[str, Any]] | None = None,
+    force_local: bool = False,
 ) -> str:
-    provider, route = _resolve_runtime_task(container, task)
+    if force_local:
+        provider, route = _resolve_forced_local_task(container, task)
+    else:
+        provider, route = _resolve_runtime_task(container, task)
     model = _resolve_task_model(container, task, provider, route)
     if image_parts:
         user_content: str | list[dict[str, Any]] = [text_part(prompt), *image_parts]

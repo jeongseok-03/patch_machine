@@ -229,7 +229,7 @@ export default function App() {
 
   function renderPage() {
     if (activePage === 'home') {
-      return <HomePage memory={memory} status={status} onAction={(next) => setPage(next as Page)} />;
+      return <HomePage memory={memory} status={status} user={currentUser!} onAction={(next) => setPage(next as Page)} />;
     }
     if (activePage === 'profile') {
       return <UserProfilePage user={currentUser!} />;

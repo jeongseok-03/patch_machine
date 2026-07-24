@@ -4,6 +4,7 @@ import {
   fetchLatestCompanyReport,
   generateCompanyReport,
   type ApiStatus,
+  type AuthUser,
   type CompanyReport,
   type OperationsMemory,
 } from '../api';
@@ -18,13 +19,25 @@ const SECTIONS: Array<[keyof CompanyReport, string, string]> = [
   ['money', '💰 돈 관련 언급', '비용, 단가, 매출, 자금 관련 내용이 여기 표시됩니다.'],
 ];
 
+const ADMIN_SHORTCUTS: Array<[string, string, string]> = [
+  ['personnel', '인사관리', '조직도, 직급, 직원 배정과 인사평가'],
+  ['work', '업무 현황', '진행 중인 업무와 병목 요약'],
+  ['documents', '문서 자동화', '회의록, 보고서, 업무 요청서 생성'],
+  ['admin', '시스템 설정', 'API 키, 감사 로그, 데이터 관리'],
+];
+
 export default function HomePage({
   memory,
+  user,
+  onAction,
 }: {
   memory: OperationsMemory;
   status: ApiStatus | null;
+  user: AuthUser;
   onAction: (page: string) => void;
 }) {
+  const permissions = user.permissions || [];
+  const isAdmin = permissions.includes('*') || permissions.includes('admin:users');
   const [report, setReport] = useState<CompanyReport | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
@@ -48,6 +61,22 @@ export default function HomePage({
   }
 
   const createdAt = report?.created_at ? new Date(report.created_at).toLocaleString() : '';
+
+  if (!isAdmin) {
+    return (
+      <section>
+        <div className="hero-panel">
+          <p className="eyebrow">{memory.company_name || '우리 회사'}</p>
+          <h1>{user.display_name}님, 안녕하세요</h1>
+          <p className="lede">오늘 할 일을 확인하고, 궁금한 회사 맥락은 AI에게 바로 물어보세요.</p>
+          <FormActions>
+            <Button onClick={() => onAction('work')}>내 업무 보기</Button>
+            <Button variant="secondary" onClick={() => onAction('chat')}>AI에게 물어보기</Button>
+          </FormActions>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section>
@@ -103,6 +132,17 @@ export default function HomePage({
           </article>
         </div>
       )}
+      <div className="report-grid">
+        {ADMIN_SHORTCUTS.map(([page, title, description]) => (
+          <article className="panel report-card" key={page}>
+            <h3>{title}</h3>
+            <p className="muted">{description}</p>
+            <FormActions>
+              <Button variant="secondary" onClick={() => onAction(page)}>열기</Button>
+            </FormActions>
+          </article>
+        ))}
+      </div>
     </section>
   );
 }

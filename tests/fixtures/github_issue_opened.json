@@ -1,0 +1,19 @@
+{
+  "action": "opened",
+  "issue": {
+    "number": 42,
+    "title": "환불 중복 발생",
+    "body": "환불 API가 중복 호출될 때 idempotency 키가 재사용됩니다.",
+    "user": {"login": "qa-tester", "type": "User"},
+    "labels": [
+      {"name": "bug"},
+      {"name": "negotium"}
+    ],
+    "html_url": "https://github.com/acme/payments/issues/42"
+  },
+  "repository": {
+    "name": "payments",
+    "default_branch": "main",
+    "owner": {"login": "acme"}
+  }
+}

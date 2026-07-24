@@ -1,0 +1,10 @@
+guilds:
+  # "123456789":            # guild ID
+  #   channels:
+  #     bugs-payments:
+  #       channel_id: "987654321"
+  #       repo: "acme/payments"
+  #       default_branch: "main"
+  #     bugs-checkout:
+  #       channel_id: "987654322"
+  #       repo: "acme/checkout"

@@ -1,0 +1,14 @@
+다음 영구 메모리 원천을 모델 컨텍스트 예산 {{ token_budget }} 토큰 안에 들어가도록 압축하세요.
+반드시 summary, facts, decisions, constraints, open_threads, source_refs 관점으로 작성하세요.
+원문은 삭제하지 않고 참조 경로를 유지해야 합니다.
+
+압축 목적:
+{{ query or "(일반 압축)" }}
+
+원천:
+{{ source_md or "(원천 없음)" }}
+{% if volatile_appendix.strip() %}
+
+휘발성 메모리(참고):
+{{ volatile_appendix.strip() }}
+{% endif %}

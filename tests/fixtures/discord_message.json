@@ -1,0 +1,8 @@
+{
+  "message_id": "1103928172",
+  "channel_id": "987654321",
+  "guild_id": "123456789",
+  "channel_name": "bugs-payments",
+  "author": "qa-tester#0001",
+  "content": "환불이 두번 찍히는 버그요. /api/refund 쪽 idempotency 좀 봐주세요."
+}

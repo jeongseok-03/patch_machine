@@ -1,0 +1,16 @@
+## 작업 명세서 ({{ issue.source }}#{{ issue.external_id }})
+- 리포지토리: {{ issue.repo.full_name }}
+- 작성자: {{ issue.author }}
+- 라벨: {{ issue.labels | join(", ") if issue.labels else "—" }}
+
+### 이슈 요약
+{{ issue.title }}
+
+{{ issue.body }}
+
+### 대상 모듈 후보
+{% for m in target_modules %}- {{ m }}
+{% endfor %}
+### 유사 과거 로그
+{% for p in related_logs %}- {{ p }}
+{% endfor %}

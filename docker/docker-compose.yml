@@ -1,0 +1,83 @@
+services:
+  negotium:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: negotium:0.1.0
+    container_name: negotium
+    restart: unless-stopped
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      NG_WORKSPACE_DIR: /var/ng/workspaces
+      NG_ARCHIVE_DIR: /app/archive
+      NG_HTTP_HOST: 0.0.0.0
+      NG_HTTP_PORT: 8080
+      NG_DISCORD_CHANNEL_MAP_PATH: /app/config/channel_map.yml
+      # The Docker image does not ship the heavy local LLM stack. To run
+      # vLLM (Qwen3-4B etc.), launch the backend on the GPU host directly
+      # with `uv pip install -e '.[dev,local-ai]'` + `uv run negotium serve`.
+      NG_LLM_PROVIDER: openai
+      NG_LLM_DEFAULT_ROUTE: cloud
+      NG_VLLM_MODE: http
+      NG_LLM_GATEWAY_URL: http://llm-gateway:8090
+    volumes:
+      - ../archive:/app/archive
+      - ../config:/app/config:ro
+      - ng-workspaces:/var/ng/workspaces
+    ports:
+      - "${NG_HOST_HTTP_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  llm-gateway:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: negotium:0.1.0
+    container_name: negotium-llm-gateway
+    restart: unless-stopped
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      NG_ARCHIVE_DIR: /app/archive
+      NG_LLM_GATEWAY_HOST: 0.0.0.0
+      NG_LLM_GATEWAY_PORT: 8090
+      NG_VLLM_MODE: http
+    volumes:
+      - ../archive:/app/archive
+    ports:
+      - "8090:8090"
+    command: negotium llm-gateway
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend.Dockerfile
+    image: negotium-frontend:0.1.0
+    container_name: negotium-frontend
+    restart: unless-stopped
+    depends_on:
+      - negotium
+    environment:
+      VITE_API_PROXY_TARGET: http://negotium:8080
+    volumes:
+      - ../frontend:/app
+      - frontend-node-modules:/app/node_modules
+    ports:
+      - "${NG_HOST_FRONTEND_PORT:-5173}:5173"
+    command: npm run dev
+
+volumes:
+  frontend-node-modules:
+  ng-workspaces:

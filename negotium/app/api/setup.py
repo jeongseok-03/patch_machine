@@ -24,11 +24,12 @@ from negotium.app.company_scan import (
     ScanConfig,
     ScanReport,
     browse_directories,
+    normalize_scan_path,
     parse_scanned_files,
     scan_company_paths,
 )
 from negotium.app.container import Container
-from negotium.app.initial_setup import parse_setup_uploads
+from negotium.app.initial_setup import parse_setup_file, parse_setup_uploads
 from negotium.app.schemas.core import (
     InitialOfficeAnalyzeRequest,
     InitialOfficeSetupResult,
@@ -242,7 +243,10 @@ def create_setup_router(container: Container) -> APIRouter:
             )
 
         report = await generate_company_report(
-            parsed_files, store=container.company_knowledge, complete=_complete
+            parsed_files,
+            store=container.company_knowledge,
+            complete=_complete,
+            resolved_items=container.company_knowledge.resolved_item_texts(),
         )
         if report is None:
             raise HTTPException(
@@ -274,6 +278,50 @@ def create_setup_router(container: Container) -> APIRouter:
             "schedule": schedule,
             "is_due": _report_is_due(schedule, report),
         }
+
+    @router.post("/setup/office/report/item-status")
+    async def set_report_item_status(
+        payload: dict[str, str],
+        x_ng_user: str | None = Header(default=None, alias="X-NG-User"),
+    ) -> dict[str, object]:
+        actor = _require(container, x_ng_user, "admin:users")
+        text = str(payload.get("text") or "").strip()
+        item_status = str(payload.get("status") or "")
+        if not text or item_status not in {"done", "dismissed"}:
+            raise HTTPException(
+                status_code=400, detail="text와 status(done/dismissed)가 필요합니다."
+            )
+        container.company_knowledge.add_resolved_item(text, item_status)
+        _audit(
+            container,
+            actor=actor,
+            action="setup.office.report_item",
+            target="company_report",
+            details={"status": item_status, "text": text[:120]},
+        )
+        return {"ok": True}
+
+    @router.post("/setup/office/document-preview")
+    async def preview_scanned_document(
+        payload: dict[str, str],
+        x_ng_user: str | None = Header(default=None, alias="X-NG-User"),
+    ) -> dict[str, object]:
+        _require(container, x_ng_user, "admin:users")
+        raw = str(payload.get("path") or "")
+        target = normalize_scan_path(raw)
+        config = container.company_knowledge.scan_config()
+        roots = [normalize_scan_path(str(r)) for r in config.get("root_paths") or []]
+        if not any(target == root or target.startswith(root + "/") for root in roots if root):
+            raise HTTPException(
+                status_code=403, detail="스캔 대상 폴더 밖의 문서는 열 수 없습니다."
+            )
+        from pathlib import Path as _Path
+
+        file_path = _Path(target)
+        if not file_path.is_file():
+            raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다.")
+        parsed = parse_setup_file(file_path)
+        return {"path": raw, "filename": parsed.filename, "text": parsed.text[:8000]}
 
     @router.get("/setup/office/report/schedule")
     async def get_report_schedule(

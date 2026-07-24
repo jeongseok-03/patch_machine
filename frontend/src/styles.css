@@ -3572,3 +3572,244 @@ button.ghost {
   display: grid;
   gap: 8px;
 }
+
+/* ----- Home: KPI tiles, status viz, report items, skeleton, toast ----- */
+:root {
+  --viz-done: #1f8a52;
+  --viz-waiting: #b8741a;
+  --viz-progress: #4050d8;
+  --viz-late: #cc2f45;
+}
+
+:root[data-theme='dark'],
+.dark {
+  --viz-done: #3fa66f;
+  --viz-waiting: #b8853e;
+  --viz-progress: #6d7ff3;
+  --viz-late: #e5484d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --viz-done: #3fa66f;
+    --viz-waiting: #b8853e;
+    --viz-progress: #6d7ff3;
+    --viz-late: #e5484d;
+  }
+}
+
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.kpi-tile {
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.kpi-tile:hover {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.kpi-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.kpi-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.viz-card {
+  margin-top: 14px;
+}
+
+.status-bar {
+  display: flex;
+  gap: 2px;
+  height: 12px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.status-seg {
+  display: block;
+  min-width: 6px;
+  border-radius: 2px;
+}
+
+.status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.status-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-legend-item strong {
+  color: var(--text-strong);
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.report-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.report-icon {
+  display: inline-flex;
+  padding: 5px;
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--accent);
+}
+
+.icon-attention { color: var(--viz-late); }
+.icon-progressed { color: var(--viz-done); }
+.icon-quiet { color: var(--muted); }
+.icon-people { color: var(--viz-progress); }
+.icon-money { color: var(--viz-waiting); }
+
+.report-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 12px;
+}
+
+.report-items li {
+  display: grid;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+
+.report-items li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.report-items p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.report-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.source-chip {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  color: var(--muted);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-chip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--surface-muted);
+}
+
+.report-item-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.report-item-actions button {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+}
+
+.report-item-actions button:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: none;
+}
+
+.skeleton-card {
+  display: grid;
+  gap: 10px;
+}
+
+.skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-muted) 25%, var(--line) 50%, var(--surface-muted) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+}
+
+.skeleton-line.w40 { width: 40%; }
+.skeleton-line.w80 { width: 80%; }
+
+@keyframes shimmer {
+  to { background-position: -200% 0; }
+}
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text-strong);
+  color: var(--surface);
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 0.86rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  z-index: 80;
+}
+
+.doc-preview {
+  overflow: auto;
+  max-height: 55vh;
+  white-space: pre-wrap;
+  font-size: 0.82rem;
+  background: var(--surface-muted);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}

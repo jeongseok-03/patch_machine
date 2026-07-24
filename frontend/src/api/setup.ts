@@ -15,16 +15,32 @@ export function browseOfficeFolders(path: string): Promise<OfficeBrowseResult> {
   });
 }
 
+export type ReportItem = { text: string; sources: string[] };
+
 export type CompanyReport = {
-  progressed?: string[];
-  attention?: string[];
-  quiet?: string[];
-  people?: string[];
-  money?: string[];
+  progressed?: Array<ReportItem | string>;
+  attention?: Array<ReportItem | string>;
+  quiet?: Array<ReportItem | string>;
+  people?: Array<ReportItem | string>;
+  money?: Array<ReportItem | string>;
   read_files?: number;
   changed_files?: number;
   created_at?: string;
 };
+
+export function setReportItemStatus(text: string, status: 'done' | 'dismissed'): Promise<{ ok: boolean }> {
+  return requestJson<{ ok: boolean }>('/api/setup/office/report/item-status', {
+    method: 'POST',
+    body: JSON.stringify({ text, status }),
+  });
+}
+
+export function previewScannedDocument(path: string): Promise<{ path: string; filename: string; text: string }> {
+  return requestJson<{ path: string; filename: string; text: string }>('/api/setup/office/document-preview', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  });
+}
 
 export type ReportInterval = 'off' | 'monthly' | 'quarterly' | 'semiannual';
 

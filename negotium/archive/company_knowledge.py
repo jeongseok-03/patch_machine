@@ -94,6 +94,23 @@ class CompanyKnowledgeStore:
         schedule = self.read().get("report_schedule")
         return schedule if isinstance(schedule, dict) else {}
 
+    def add_resolved_item(self, text: str, status: str) -> None:
+        payload = self.read()
+        items = payload.get("resolved_items")
+        if not isinstance(items, list):
+            items = []
+        items = [item for item in items if item.get("text") != text]
+        items.append({"text": text, "status": status, "at": datetime.now(UTC).isoformat()})
+        payload["resolved_items"] = items[-200:]
+        payload["updated_at"] = datetime.now(UTC).isoformat()
+        write_json_file(self._path, payload)
+
+    def resolved_item_texts(self) -> list[str]:
+        items = self.read().get("resolved_items")
+        if not isinstance(items, list):
+            return []
+        return [str(item.get("text")) for item in items if item.get("text")]
+
     def latest_report(self) -> dict[str, Any]:
         reports = self.read().get("reports")
         if isinstance(reports, list) and reports and isinstance(reports[-1], dict):

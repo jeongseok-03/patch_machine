@@ -36,6 +36,7 @@ from negotium.app.api.patchops_execution import create_patchops_execution_router
 from negotium.app.api.setup import create_setup_router
 from negotium.app.api.uploads import create_uploads_router
 from negotium.app.api.work import create_work_router
+from negotium.app.api.workspace import create_workspace_router
 from negotium.app.container import Container
 
 __all__ = [
@@ -69,6 +70,7 @@ __all__ = [
     "create_setup_router",
     "create_uploads_router",
     "create_work_router",
+    "create_workspace_router",
 ]
 
 
@@ -83,6 +85,7 @@ def create_operations_api_router(container: Container) -> APIRouter:
     router.include_router(create_integrations_router(container))
     router.include_router(create_llm_router(container))
     router.include_router(create_work_router(container))
+    router.include_router(create_workspace_router(container))
     router.include_router(create_agent_router(container))
     router.include_router(create_admin_router(container))
     router.include_router(create_memory_router(container))

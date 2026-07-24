@@ -1,7 +1,10 @@
 import { useEffect, useState, type ReactElement } from 'react';
 
 import {
+  createAnnouncement,
   createWorkScheduleItem,
+  deleteAnnouncement,
+  fetchAnnouncements,
   generateHandoverDraft,
   generateWeeklyDraft,
   fetchCompanyReportStatus,
@@ -18,6 +21,7 @@ import {
   type ReportInterval,
   type ReportItem,
   type WorkScheduleItem,
+  type Announcement,
 } from '../api';
 import Button from './common/Button';
 import FormActions from './common/FormActions';
@@ -120,6 +124,9 @@ export default function HomePage({
   const [draftText, setDraftText] = useState<{ title: string; markdown: string } | null>(null);
   const [draftBusy, setDraftBusy] = useState(false);
   const [handoverName, setHandoverName] = useState('');
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [noticeTitle, setNoticeTitle] = useState('');
+  const [noticeBody, setNoticeBody] = useState('');
 
   function showToast(message: string) {
     setToast(message);
@@ -127,6 +134,9 @@ export default function HomePage({
   }
 
   useEffect(() => {
+    fetchAnnouncements()
+      .then((payload) => setAnnouncements(payload.items))
+      .catch(() => setAnnouncements([]));
     fetchWorkSchedule()
       .then((payload) => setWorkItems(payload.items))
       .catch(() => setWorkItems([]));
@@ -242,6 +252,80 @@ export default function HomePage({
     }
   }
 
+  async function postAnnouncement() {
+    if (!noticeTitle.trim()) {
+      showToast('공지 제목을 입력하세요.');
+      return;
+    }
+    try {
+      const result = await createAnnouncement({ title: noticeTitle.trim(), body: noticeBody.trim() });
+      setAnnouncements(result.items);
+      setNoticeTitle('');
+      setNoticeBody('');
+      showToast('공지를 올렸습니다. 전 직원 홈에 표시됩니다.');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : '공지 등록 실패');
+    }
+  }
+
+  async function removeAnnouncement(id: string) {
+    try {
+      const result = await deleteAnnouncement(id);
+      setAnnouncements(result.items);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : '공지 삭제 실패');
+    }
+  }
+
+  const announcementList = (canManage: boolean) => (
+    <article className="panel report-card">
+      <h3>회사 공지</h3>
+      {announcements.length ? (
+        <ul className="report-items">
+          {announcements.slice(0, 5).map((item) => (
+            <li key={item.id}>
+              <p>
+                {item.pinned ? <strong>[고정] </strong> : null}
+                <strong>{item.title}</strong>
+                {item.body ? ` — ${item.body}` : ''}
+              </p>
+              <div className="report-item-meta">
+                <span className="muted" style={{ fontSize: '0.75rem' }}>
+                  {item.author_name} · {new Date(item.created_at).toLocaleDateString()}
+                </span>
+                {canManage ? (
+                  <span className="report-item-actions">
+                    <button type="button" onClick={() => void removeAnnouncement(item.id)}>삭제</button>
+                  </span>
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted">등록된 공지가 없습니다.</p>
+      )}
+      {canManage ? (
+        <div className="memory-form">
+          <input
+            value={noticeTitle}
+            placeholder="공지 제목"
+            onChange={(e) => setNoticeTitle(e.target.value)}
+          />
+          <textarea
+            value={noticeBody}
+            rows={2}
+            placeholder="내용 (선택)"
+            onChange={(e) => setNoticeBody(e.target.value)}
+          />
+          <FormActions>
+            <Button variant="secondary" onClick={() => void postAnnouncement()}>공지 올리기</Button>
+          </FormActions>
+        </div>
+      ) : null}
+    </article>
+  );
+
   const draftModal = draftText ? (
     <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => setDraftText(null)}>
       <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
@@ -299,6 +383,7 @@ export default function HomePage({
             <Button variant="secondary" onClick={() => onAction('work')}>업무 현황</Button>
           </FormActions>
         </div>
+        {announcementList(false)}
         <article className="panel report-card">
           <h3>내 업무</h3>
           {myItems.length ? (
@@ -347,6 +432,10 @@ export default function HomePage({
           </label>
           {createdAt ? <span className="muted">마지막 리포트: {createdAt}</span> : null}
         </FormActions>
+      </div>
+
+      <div className="report-grid" style={{ marginTop: 16 }}>
+        {announcementList(true)}
       </div>
 
       <div className="kpi-strip">

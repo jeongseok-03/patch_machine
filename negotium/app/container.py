@@ -27,6 +27,7 @@ from negotium.application.orchestrator import Orchestrator
 from negotium.archive.access_control import AccessControlStore
 from negotium.archive.agent_execution import AgentExecutionStore
 from negotium.archive.ai_jobs import AiJobStore
+from negotium.archive.announcements import AnnouncementStore
 from negotium.archive.audit_log import AuditLogStore
 from negotium.archive.auth_store import AuthStore
 from negotium.archive.company_knowledge import CompanyKnowledgeStore
@@ -69,6 +70,7 @@ class Container:
     retriever: MarkdownRetriever
     operations_memory: OperationsMemoryStore
     company_knowledge: CompanyKnowledgeStore
+    announcements: AnnouncementStore
     ai_jobs: AiJobStore
     llm_runtime: LlmRuntimeStore
     access_control: AccessControlStore
@@ -123,6 +125,7 @@ class Container:
         archive = ArchiveWriter(settings.archive_dir)
         operations_memory = OperationsMemoryStore(settings.archive_dir)
         company_knowledge = CompanyKnowledgeStore(settings.archive_dir)
+        announcements = AnnouncementStore(settings.archive_dir)
         ai_jobs = AiJobStore(settings.archive_dir)
         llm_runtime = LlmRuntimeStore(settings.archive_dir)
         access_control = AccessControlStore(settings.archive_dir)
@@ -209,6 +212,7 @@ class Container:
             retriever=retriever,
             operations_memory=operations_memory,
             company_knowledge=company_knowledge,
+            announcements=announcements,
             ai_jobs=ai_jobs,
             llm_runtime=llm_runtime,
             access_control=access_control,

@@ -8,6 +8,7 @@ export * from './documents';
 export * from './integrations';
 export * from './llm';
 export * from './work';
+export * from './workspace';
 export * from './agent';
 export * from './admin';
 export * from './memory';
